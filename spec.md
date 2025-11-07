@@ -1,6 +1,14 @@
 
 A python-based tkinter app for managing a web app dev environment.
 
+
+## Dependenceis
+
+Should use minimal dependencies, ideally just tcl/tk, subprocess, and
+other built-ins.
+
+Use uv to manage python dependencies. Main app source file should be `limousine/main.py`.
+
 ## Persistent Storage - global
 
 Stores global data in a file `.limousine-project-driver` in the home
@@ -126,6 +134,8 @@ The app should have a tab-based layout with the following tabs:
     streaming log of the app log (stdout+stderr from the run command).
 
 
+There should be a settings button (or dropdown menu) with an about
+dialog thta shows the logs and version number (get from importlib).
 
 ## Running commands
 
@@ -135,3 +145,24 @@ captured in realtime. Every command should store a pid file on disk in
 in the long-running process data. When the command ends, or is
 stopped, the pid file should be deleted.
 
+Commands should copy the system environment to run commands in.
+
+## Responsiveness 
+
+If the app does any potentially long running or UI blocking tasks, it
+should show a spinner (e.g. cloning github repos), ideally with a
+cancel button. 
+
+## Source file structure
+
+Aim for a modular approach with reusable components in separate
+files. Files should not be longer than ~150 lines whenever possible,
+though can go up to ~200 lines if necessary. Don't write comments. 
+
+Use the standard `logging` module, piped to both stdout and a log
+file. Log any exceptions caught with `exc_info=True`. Never swallow
+exceptions without logging them. 
+
+## Cross-platform
+
+The app is intended to run on MacOs and Linux. 
