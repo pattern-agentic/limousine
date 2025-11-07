@@ -3,6 +3,7 @@ import psutil
 import threading
 from pathlib import Path
 from datetime import datetime
+from collections import deque
 from limousine.models.state import ProcessState
 from limousine.process.pidfile import create_pidfile, remove_pidfile, read_pidfile
 from limousine.utils.logging_config import get_logger
@@ -45,7 +46,7 @@ def start_command(
             start_time=datetime.now(),
         )
 
-        state.output_buffer.maxlen = buffer_size
+        state.output_buffer = deque(maxlen=buffer_size)
 
         _active_processes[process.pid] = process
 
