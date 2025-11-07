@@ -27,7 +27,7 @@ directory of the user. This should include:
 
 A folder containing a file named 
 
-    .limousine-proj
+    .limousine.proj
 
 it should store the following data in the json format:
 
@@ -158,7 +158,8 @@ The app should have a tab-based layout with the following tabs:
 
 
 There should be a settings button (or dropdown menu) with an about
-dialog thta shows the logs and version number (get from importlib).
+dialog thta shows the log path for the app log (not service logs) and
+version number (get from importlib).
 
 ## Running commands
 
