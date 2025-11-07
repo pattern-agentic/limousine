@@ -144,7 +144,7 @@ def stop_command(
             process.wait(timeout=0.5)
             logger.info(f"Process {pid} terminated")
             if process_state:
-                process_state.add_output("Process terminated\n")
+                process_state.add_output("\n(process terminated)\n==========================================\n\n")
             if pidfile_path:
                 remove_pidfile(pidfile_path)
             return True, None

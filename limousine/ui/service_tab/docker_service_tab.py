@@ -95,7 +95,7 @@ class DockerServiceTab(ttk.Frame):
 
     def update_status(self):
         if not self.current_command:
-            self.status_label.config(text="N/A")
+            self.status_label.config(text="N/A", foreground="gray")
             self.start_stop_button.config(state=tk.DISABLED)
             return
 
@@ -119,7 +119,12 @@ class DockerServiceTab(ttk.Frame):
         else:
             status = process_state.state
 
-        self.status_label.config(text=status)
+        if status == "running":
+            self.status_label.config(text=status, foreground="green")
+        elif status == "stopped":
+            self.status_label.config(text=status, foreground="yellow")
+        else:
+            self.status_label.config(text=status, foreground="gray")
 
         if status == "running":
             if process_state and process_state.termination_stage:
@@ -148,7 +153,7 @@ class DockerServiceTab(ttk.Frame):
     def on_start_clicked(self):
         logger.info(f"Starting docker:{self.service_name}:{self.current_command}")
         self.start_stop_button.config(state=tk.DISABLED)
-        self.status_label.config(text="starting...")
+        self.status_label.config(text="starting...", foreground="darkgreen")
 
         try:
             process_state = start_docker_service(
@@ -174,7 +179,7 @@ class DockerServiceTab(ttk.Frame):
     def on_stop_clicked(self):
         logger.info(f"Stopping docker:{self.service_name}:{self.current_command}")
         self.start_stop_button.config(state=tk.DISABLED)
-        self.status_label.config(text="stopping...")
+        self.status_label.config(text="stopping...", foreground="darkorange")
 
         self.stop_log_streaming()
 
@@ -188,6 +193,7 @@ class DockerServiceTab(ttk.Frame):
 
             if success:
                 logger.info(f"Stopped successfully")
+                self.log_viewer.append_lines(["\n(process terminated)\n============================\n"])
             else:
                 logger.warning(f"Failed to stop")
 
