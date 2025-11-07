@@ -86,12 +86,13 @@ class LimousineApp(tk.Tk):
 
             self.after(0, complete_load)
 
-        except Exception as e:
-            logger.error(f"Failed to load project: {e}", exc_info=True)
+        except Exception as ex:
+            msg = str(ex)
+            logger.error(f"Failed to load project: {msg}", exc_info=True)
             def show_error():
                 messagebox.showerror(
                     "Load Error",
-                    f"Failed to load project:\n{str(e)}",
+                    f"Failed to load project:\n{str(msg)}",
                 )
                 self.show_welcome_screen()
             self.after(0, show_error)
