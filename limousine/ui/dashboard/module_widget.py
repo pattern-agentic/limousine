@@ -17,11 +17,13 @@ class ModuleWidget(ttk.LabelFrame):
         module: Module,
         project_root: Path,
         state_manager: StateManager,
+        tab_manager=None,
     ):
         super().__init__(parent, text=module.name, padding=10)
         self.module = module
         self.project_root = project_root
         self.state_manager = state_manager
+        self.tab_manager = tab_manager
 
         self.is_cloned = check_module_cloned(module, project_root)
 
@@ -58,6 +60,7 @@ class ModuleWidget(ttk.LabelFrame):
                     service,
                     self.project_root,
                     self.state_manager,
+                    self.tab_manager,
                 )
                 service_row.pack(fill=tk.X, pady=2)
 
@@ -90,7 +93,9 @@ class ModuleWidget(ttk.LabelFrame):
             messagebox.showerror("Clone Failed", f"Failed to clone {self.module.name}:\n{message}")
 
     def on_update_env_clicked(self):
-        messagebox.showinfo("Update Env", "Env file update feature coming in Stage 3")
+        from limousine.ui.dialogs.env_dialog import EnvUpdateDialog
+
+        EnvUpdateDialog(self.winfo_toplevel(), self.module, self.project_root)
 
     def on_check_secrets_clicked(self):
         if not self.module.config:

@@ -17,11 +17,13 @@ class DashboardTab(ttk.Frame):
         project_config: ProjectConfig,
         project_root: Path,
         state_manager: StateManager,
+        tab_manager=None,
     ):
         super().__init__(parent, padding=10)
         self.project_config = project_config
         self.project_root = project_root
         self.state_manager = state_manager
+        self.tab_manager = tab_manager
 
         self.create_widgets()
 
@@ -59,7 +61,7 @@ class DashboardTab(ttk.Frame):
     def render_modules(self, parent):
         for module_name, module in self.project_config.modules.items():
             module_widget = ModuleWidget(
-                parent, module, self.project_root, self.state_manager
+                parent, module, self.project_root, self.state_manager, self.tab_manager
             )
             module_widget.pack(fill=tk.X, pady=5, padx=5)
 

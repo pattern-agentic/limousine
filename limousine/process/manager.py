@@ -1,5 +1,6 @@
 import subprocess
 import psutil
+import threading
 from pathlib import Path
 from datetime import datetime
 from limousine.models.state import ProcessState
@@ -7,6 +8,8 @@ from limousine.process.pidfile import create_pidfile, remove_pidfile, read_pidfi
 from limousine.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+_active_processes: dict[int, subprocess.Popen] = {}
 
 
 def start_command(
@@ -43,6 +46,24 @@ def start_command(
         )
 
         state.output_buffer.maxlen = buffer_size
+
+        _active_processes[process.pid] = process
+
+        def capture_output():
+            try:
+                for line in iter(process.stdout.readline, ""):
+                    if not line:
+                        break
+                    state.add_output(line)
+                process.wait()
+            except Exception as e:
+                logger.error(f"Error capturing output: {e}", exc_info=True)
+            finally:
+                if process.pid in _active_processes:
+                    del _active_processes[process.pid]
+
+        thread = threading.Thread(target=capture_output, daemon=True)
+        thread.start()
 
         logger.info(
             f"Started {service_name}:{command_name} with PID {process.pid}"

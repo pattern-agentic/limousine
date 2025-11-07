@@ -57,3 +57,8 @@ should show the (app) log file path and the version.
 IN SAME SESSION:
 
 Plesae go ahead and implement stage 2
+
+
+IN SAME SESSION:
+
+Plesae go ahead and implement stage 3

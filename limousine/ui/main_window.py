@@ -5,6 +5,11 @@ from limousine.models.config import ProjectConfig
 from limousine.state_manager import StateManager
 from limousine.ui.dashboard.dashboard import DashboardTab
 from limousine.ui.startup import load_or_select_project
+from limousine.ui.tab_manager import TabManager
+from limousine.ui.dialogs.about_dialog import AboutDialog
+from limousine.ui.dialogs.settings_dialog import SettingsDialog
+from limousine.process.recovery import cleanup_crashed_processes
+from limousine.utils.path_utils import get_limousine_dir
 from limousine.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -27,8 +32,16 @@ class MainWindow(ttk.Frame):
 
         self.pack(fill=tk.BOTH, expand=True)
 
+        self.cleanup_on_startup()
         self.create_menu_bar()
         self.create_tab_container()
+
+    def cleanup_on_startup(self):
+        limousine_dir = get_limousine_dir(self.project_root)
+        pids_dir = limousine_dir / "pids"
+        cleaned = cleanup_crashed_processes(pids_dir)
+        if cleaned > 0:
+            logger.info(f"Cleaned up {cleaned} stale processes on startup")
 
     def create_menu_bar(self):
         menubar = tk.Menu(self.parent)
@@ -37,6 +50,8 @@ class MainWindow(ttk.Frame):
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Switch Project", command=self.switch_project)
+        file_menu.add_separator()
+        file_menu.add_command(label="Settings", command=self.show_settings_dialog)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.parent.quit)
 
@@ -48,11 +63,19 @@ class MainWindow(ttk.Frame):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
+        self.tab_manager = TabManager(
+            self.notebook,
+            self.project_config,
+            self.project_root,
+            self.state_manager,
+        )
+
         dashboard_tab = DashboardTab(
             self.notebook,
             self.project_config,
             self.project_root,
             self.state_manager,
+            self.tab_manager,
         )
         self.notebook.add(dashboard_tab, text="Dashboard")
 
@@ -67,21 +90,7 @@ class MainWindow(ttk.Frame):
             app.run()
 
     def show_about_dialog(self):
-        try:
-            from importlib.metadata import version
+        AboutDialog(self.parent, self.project_path)
 
-            app_version = version("limousine")
-        except Exception:
-            app_version = "0.1.0"
-
-        log_file_path = Path.home() / ".limousine" / "logs" / "limousine.log"
-
-        about_text = f"""Limousine v{app_version}
-
-Microservice Development Environment Manager
-
-Log file: {log_file_path}
-Project: {self.project_path.name}
-"""
-
-        messagebox.showinfo("About Limousine", about_text)
+    def show_settings_dialog(self):
+        SettingsDialog(self.parent)

@@ -1,0 +1,2 @@
+[console_scripts]
+limousine = limousine.main:main
