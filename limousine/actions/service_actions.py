@@ -79,11 +79,21 @@ def stop_service(
     pids_dir = limousine_dir / "pids"
     pidfile = pids_dir / f"{module_name}_{service_name}_{command_name}.pid"
 
-    success = stop_command(process_state.pid, pidfile)
+    signal = process_state.termination_stage or "SIGINT"
+
+    success, next_stage = stop_command(
+        process_state.pid, pidfile, signal, process_state
+    )
 
     if success:
         process_state.state = "stopped"
         process_state.pid = None
+        process_state.termination_stage = None
+        state_manager.update_service_state(
+            module_name, service_name, command_name, process_state
+        )
+    else:
+        process_state.termination_stage = next_stage
         state_manager.update_service_state(
             module_name, service_name, command_name, process_state
         )
@@ -164,11 +174,19 @@ def stop_docker_service(
     pids_dir = limousine_dir / "pids"
     pidfile = pids_dir / f"docker_{service_name}_{command_name}.pid"
 
-    success = stop_command(process_state.pid, pidfile)
+    signal = process_state.termination_stage or "SIGINT"
+
+    success, next_stage = stop_command(
+        process_state.pid, pidfile, signal, process_state
+    )
 
     if success:
         process_state.state = "stopped"
         process_state.pid = None
+        process_state.termination_stage = None
+        state_manager.update_docker_service_state(service_name, command_name, process_state)
+    else:
+        process_state.termination_stage = next_stage
         state_manager.update_docker_service_state(service_name, command_name, process_state)
 
     return success

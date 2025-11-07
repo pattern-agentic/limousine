@@ -79,6 +79,15 @@ class MainWindow(ttk.Frame):
         )
         self.notebook.add(dashboard_tab, text="Dashboard")
 
+        for module_name, module in self.project_config.modules.items():
+            for service_name in module.services.keys():
+                self.tab_manager.add_service_tab(
+                    module_name, service_name, show_spinner=False
+                )
+
+        for docker_service_name in self.project_config.docker_services.keys():
+            self.tab_manager.add_docker_service_tab(docker_service_name)
+
     def switch_project(self):
         file_path = filedialog.askopenfilename(
             title="Select .limousine-proj file",

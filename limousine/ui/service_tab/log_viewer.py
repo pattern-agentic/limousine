@@ -9,6 +9,9 @@ class LogViewer(scrolledtext.ScrolledText):
             wrap=tk.WORD,
             font=("Courier", 9),
             state=tk.DISABLED,
+            bg="black",
+            fg="white",
+            insertbackground="white",
             **kwargs,
         )
         self.auto_scroll_enabled = True

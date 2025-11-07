@@ -88,7 +88,13 @@ class ServiceRow(ttk.Frame):
         self.status_label.config(text=status)
 
         if status == "running":
-            self.start_stop_button.config(text="Stop")
+            process_state = self.state_manager.get_service_state(
+                self.module.name, self.service_name, self.current_command
+            )
+            if process_state and process_state.termination_stage:
+                self.start_stop_button.config(text=f"Stop ({process_state.termination_stage})")
+            else:
+                self.start_stop_button.config(text="Stop")
         else:
             self.start_stop_button.config(text="Start")
 
@@ -164,6 +170,5 @@ class ServiceRow(ttk.Frame):
 
     def on_view_logs_clicked(self):
         if self.tab_manager:
-            self.tab_manager.add_service_tab(
-                self.module.name, self.service_name, show_spinner=False
-            )
+            tab_id = f"{self.module.name}:{self.service_name}"
+            self.tab_manager.switch_to_tab(tab_id)

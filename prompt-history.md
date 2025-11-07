@@ -85,3 +85,45 @@ python: ../../src/xcb_io.c:157: append_pending_request: Assertion
 I tested it and the problem still persists. Is it possible to have the main app
   window load, and instead of having a prompt, the main window shows this text with
   a button if no project file is chosen ? 
+
+# 6
+
+ I'm getting this error when I try to start the mgmt-api service:
+
+```
+2025-11-07 22:04:12,839 - limousine.process.manager - ERROR - Failed to start mgmt-api_mgmt-api:start: attribute 'maxlen' of 'collections.deque' objects is not writable
+Traceback (most recent call last):
+  File "/home/amos/Projects/pa/limousine/limousine/process/manager.py", line 48, in start_command
+    state.output_buffer.maxlen = buffer_size
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: attribute 'maxlen' of 'collections.deque' objects is not writable
+2025-11-07 22:04:12,841 - limousine.ui.dashboard.service_row - ERROR - Failed to start: attribute 'maxlen' of 'collections.deque' objects is not writable
+
+``` 
+
+
+#7
+
+(after fixing it due to tcl version mismatch in the uv env)
+
+Can you modify it so that tabs are created on startup, rather than on demand ? 
+
+
+# 8
+
+Check out @spec.md and @implementation-plan.md for a description of this project, though note that it has evolved beyond both specs slightly (see @prompt-history.md for
+ a history of changes we've made). 
+
+an issue I'm seeing is that when stop button is pressed for module or docker service commands, it doesn't actually stop the command process, it simply transitions to a 
+stopped state. I'd like to change that so that instead, it has this behavior when the stop button is pressed:
+
+First time it is presed, a SIGINT is sent to the process and a message is logged `sent SIGINT, waiting for process to terminate...`. The stop button then chnges to say 
+`stop (SIGTERM)`. If the process doesn't quit and the button is pressed again, it sends a SIGTERM and prints a log message, and the stop button changes to `stop 
+(SIGKILL)`. If the process doesn't exit and the stop button is pressed again, it sends a SIGKILL and prints a log message. It should strive to kill any child processes as
+ well. When the process exits it should print a message to th elog ("process terminated")
+ 
+ 
+ # 9
+
+Can you change the log views in the tabs so that they show a black background with white (mostly white) text, instead of black text on a  white background?
+

@@ -5,6 +5,7 @@ from limousine.state_manager import StateManager
 from limousine.storage.project_config import load_project_config, validate_project_config
 from limousine.ui.main_window import MainWindow
 from limousine.ui.welcome_screen import WelcomeScreen
+from limousine.ui.loading_screen import LoadingScreen
 from limousine.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -38,10 +39,20 @@ class LimousineApp(tk.Tk):
 
         self.after(0, do_show)
 
+    def show_loading_screen(self, message: str = "Loading project..."):
+        if self.current_view:
+            self.current_view.destroy()
+            self.current_view = None
+
+        self.current_view = LoadingScreen(self, message)
+        self.update_idletasks()
+
     def on_project_selected(self, project_path: Path):
         self.after(0, lambda: self.load_project(project_path))
 
     def load_project(self, project_path: Path):
+        self.show_loading_screen("Loading project...")
+
         if not project_path.exists():
             def show_error():
                 messagebox.showerror(
@@ -69,6 +80,9 @@ class LimousineApp(tk.Tk):
             self.project_path = project_path
 
             def complete_load():
+                if isinstance(self.current_view, LoadingScreen):
+                    self.current_view.update_message("Creating tabs...")
+
                 if self.current_view:
                     self.current_view.destroy()
                     self.current_view = None
@@ -84,7 +98,7 @@ class LimousineApp(tk.Tk):
 
                 logger.info(f"Loaded project: {project_path}")
 
-            self.after(0, complete_load)
+            self.after(100, complete_load)
 
         except Exception as ex:
             msg = str(ex)

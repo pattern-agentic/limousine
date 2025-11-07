@@ -2,34 +2,35 @@ import tkinter as tk
 from tkinter import ttk
 from pathlib import Path
 import threading
-import subprocess
-from limousine.models.config import Module, Service
+from limousine.models.config import DockerService
 from limousine.state_manager import StateManager
 from limousine.ui.service_tab.log_viewer import LogViewer
-from limousine.actions.service_actions import start_service, stop_service, get_service_status
+from limousine.actions.service_actions import (
+    start_docker_service,
+    stop_docker_service,
+    get_service_status,
+)
 from limousine.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class ServiceTab(ttk.Frame):
+class DockerServiceTab(ttk.Frame):
     def __init__(
         self,
         parent,
-        module: Module,
+        docker_service: DockerService,
         service_name: str,
-        service: Service,
         project_root: Path,
         state_manager: StateManager,
     ):
         super().__init__(parent, padding=10)
-        self.module = module
+        self.docker_service = docker_service
         self.service_name = service_name
-        self.service = service
         self.project_root = project_root
         self.state_manager = state_manager
 
-        self.command_names = list(service.commands.keys())
+        self.command_names = list(docker_service.commands.keys())
         self.current_command = self.command_names[0] if self.command_names else None
 
         self.stream_thread = None
@@ -98,19 +99,29 @@ class ServiceTab(ttk.Frame):
             self.start_stop_button.config(state=tk.DISABLED)
             return
 
-        status = get_service_status(
-            self.module.name,
-            self.service_name,
-            self.current_command,
-            self.state_manager,
+        process_state = self.state_manager.get_docker_service_state(
+            self.service_name, self.current_command
         )
+
+        if not process_state:
+            status = "stopped"
+        elif process_state.state == "running" and process_state.pid:
+            from limousine.process.manager import check_process_running
+
+            if check_process_running(process_state.pid):
+                status = "running"
+            else:
+                process_state.state = "stopped"
+                self.state_manager.update_docker_service_state(
+                    self.service_name, self.current_command, process_state
+                )
+                status = "stopped"
+        else:
+            status = process_state.state
 
         self.status_label.config(text=status)
 
         if status == "running":
-            process_state = self.state_manager.get_service_state(
-                self.module.name, self.service_name, self.current_command
-            )
             if process_state and process_state.termination_stage:
                 self.start_stop_button.config(text=f"Stop ({process_state.termination_stage})")
             else:
@@ -125,26 +136,23 @@ class ServiceTab(ttk.Frame):
         if not self.current_command:
             return
 
-        status = get_service_status(
-            self.module.name,
-            self.service_name,
-            self.current_command,
-            self.state_manager,
+        process_state = self.state_manager.get_docker_service_state(
+            self.service_name, self.current_command
         )
 
-        if status == "running":
+        if process_state and process_state.state == "running":
             self.on_stop_clicked()
         else:
             self.on_start_clicked()
 
     def on_start_clicked(self):
-        logger.info(f"Starting {self.module.name}:{self.service_name}:{self.current_command}")
+        logger.info(f"Starting docker:{self.service_name}:{self.current_command}")
         self.start_stop_button.config(state=tk.DISABLED)
         self.status_label.config(text="starting...")
 
         try:
-            process_state = start_service(
-                self.module,
+            process_state = start_docker_service(
+                self.docker_service,
                 self.service_name,
                 self.current_command,
                 self.project_root,
@@ -158,21 +166,20 @@ class ServiceTab(ttk.Frame):
                 logger.error(f"Failed to start: {process_state.last_error}")
 
         except Exception as e:
-            logger.error(f"Error starting service: {e}", exc_info=True)
+            logger.error(f"Error starting docker service: {e}", exc_info=True)
         finally:
             self.after(500, self.update_status)
             self.start_stop_button.config(state=tk.NORMAL)
 
     def on_stop_clicked(self):
-        logger.info(f"Stopping {self.module.name}:{self.service_name}:{self.current_command}")
+        logger.info(f"Stopping docker:{self.service_name}:{self.current_command}")
         self.start_stop_button.config(state=tk.DISABLED)
         self.status_label.config(text="stopping...")
 
         self.stop_log_streaming()
 
         try:
-            success = stop_service(
-                self.module.name,
+            success = stop_docker_service(
                 self.service_name,
                 self.current_command,
                 self.project_root,
@@ -185,14 +192,14 @@ class ServiceTab(ttk.Frame):
                 logger.warning(f"Failed to stop")
 
         except Exception as e:
-            logger.error(f"Error stopping service: {e}", exc_info=True)
+            logger.error(f"Error stopping docker service: {e}", exc_info=True)
         finally:
             self.after(500, self.update_status)
             self.start_stop_button.config(state=tk.NORMAL)
 
     def start_log_streaming(self):
-        process_state = self.state_manager.get_service_state(
-            self.module.name, self.service_name, self.current_command
+        process_state = self.state_manager.get_docker_service_state(
+            self.service_name, self.current_command
         )
 
         if not process_state or not process_state.pid:
@@ -207,8 +214,8 @@ class ServiceTab(ttk.Frame):
         def stream_logs():
             try:
                 while not self.stop_streaming:
-                    ps = self.state_manager.get_service_state(
-                        self.module.name, self.service_name, self.current_command
+                    ps = self.state_manager.get_docker_service_state(
+                        self.service_name, self.current_command
                     )
 
                     if ps and ps.output_buffer:

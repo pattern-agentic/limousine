@@ -12,6 +12,7 @@ class ProcessState:
     pid: int | None = None
     start_time: datetime | None = None
     output_buffer: deque = field(default_factory=lambda: deque(maxlen=5000))
+    termination_stage: str | None = None
 
     def add_output(self, line: str) -> None:
         self.output_buffer.append(line)

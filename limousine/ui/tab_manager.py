@@ -3,6 +3,7 @@ from pathlib import Path
 from limousine.models.config import ProjectConfig
 from limousine.state_manager import StateManager
 from limousine.ui.service_tab.service_tab import ServiceTab
+from limousine.ui.service_tab.docker_service_tab import DockerServiceTab
 from limousine.ui.dialogs.progress_dialog import ProgressDialog
 from limousine.utils.logging_config import get_logger
 
@@ -79,7 +80,23 @@ class TabManager:
             self.switch_to_tab(tab_id)
             return
 
-        logger.info(f"Docker service tabs not yet fully implemented: {service_name}")
+        docker_service = self.project_config.docker_services.get(service_name)
+        if not docker_service:
+            logger.error(f"Docker service {service_name} not found")
+            return
+
+        docker_service_tab = DockerServiceTab(
+            self.notebook,
+            docker_service,
+            service_name,
+            self.project_root,
+            self.state_manager,
+        )
+
+        self.service_tabs[tab_id] = docker_service_tab
+        self.notebook.add(docker_service_tab, text=f"docker:{service_name}")
+
+        logger.info(f"Created docker service tab: {service_name}")
 
     def remove_tab(self, tab_id: str) -> None:
         if tab_id not in self.service_tabs:
