@@ -12,7 +12,11 @@ def show_project_selector(root: tk.Tk, projects: list[Path]) -> Path | None:
     dialog = tk.Toplevel(root)
     dialog.title("Select Project")
     dialog.geometry("500x400")
-    dialog.transient(root)
+
+    root_visible = root.winfo_viewable()
+    if root_visible:
+        dialog.transient(root)
+
     dialog.grab_set()
 
     selected_project = None
@@ -73,6 +77,14 @@ def show_project_selector(root: tk.Tk, projects: list[Path]) -> Path | None:
     ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(
         side=tk.RIGHT, padx=5
     )
+
+    if not root_visible:
+        dialog.update_idletasks()
+        screen_width = dialog.winfo_screenwidth()
+        screen_height = dialog.winfo_screenheight()
+        x = (screen_width - dialog.winfo_width()) // 2
+        y = (screen_height - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
 
     dialog.wait_window()
     return selected_project

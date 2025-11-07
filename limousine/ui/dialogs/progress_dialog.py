@@ -7,8 +7,6 @@ class ProgressDialog(tk.Toplevel):
         super().__init__(parent)
         self.title(title)
         self.geometry("400x150")
-        self.transient(parent)
-        self.grab_set()
 
         self.cancelled = False
         self.on_cancel_callback = None
@@ -31,6 +29,10 @@ class ProgressDialog(tk.Toplevel):
             self.add_cancel_button()
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.update_idletasks()
+        self.transient(parent)
+        self.grab_set()
 
         self.center_on_parent(parent)
 

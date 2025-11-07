@@ -1,14 +1,14 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 from limousine.models.config import ProjectConfig
 from limousine.state_manager import StateManager
 from limousine.ui.dashboard.dashboard import DashboardTab
-from limousine.ui.startup import load_or_select_project
 from limousine.ui.tab_manager import TabManager
 from limousine.ui.dialogs.about_dialog import AboutDialog
 from limousine.ui.dialogs.settings_dialog import SettingsDialog
 from limousine.process.recovery import cleanup_crashed_processes
+from limousine.storage.global_config import load_global_config, save_global_config
 from limousine.utils.path_utils import get_limousine_dir
 from limousine.utils.logging_config import get_logger
 
@@ -80,14 +80,25 @@ class MainWindow(ttk.Frame):
         self.notebook.add(dashboard_tab, text="Dashboard")
 
     def switch_project(self):
-        new_project_path = load_or_select_project(self.parent)
+        file_path = filedialog.askopenfilename(
+            title="Select .limousine-proj file",
+            filetypes=[("Limousine Project", "*.limousine-proj"), ("All files", "*.*")],
+        )
 
-        if new_project_path and new_project_path != self.project_path:
-            self.parent.destroy()
-            from limousine.ui.app import LimousineApp
+        if file_path:
+            new_project_path = Path(file_path)
 
-            app = LimousineApp(new_project_path)
-            app.run()
+            if new_project_path != self.project_path:
+                global_config = load_global_config()
+                if new_project_path not in global_config.projects:
+                    global_config.projects.append(new_project_path)
+                    save_global_config(global_config)
+
+                def do_switch():
+                    self.destroy()
+                    self.parent.load_project(new_project_path)
+
+                self.after(0, do_switch)
 
     def show_about_dialog(self):
         AboutDialog(self.parent, self.project_path)

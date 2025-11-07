@@ -62,3 +62,26 @@ Plesae go ahead and implement stage 2
 IN SAME SESSION:
 
 Plesae go ahead and implement stage 3
+
+
+# 4
+
+when I run the project, I get a prompt to select a limousine project file. But 
+when I click ok it crashes:
+
+
+uv run limousine
+[xcb] Unknown sequence number while appending request
+[xcb] You called XInitThreads, this is not your fault
+[xcb] Aborting, sorry about that.
+python: ../../src/xcb_io.c:157: append_pending_request: Assertion 
+`!xcb_xlib_unknown_seq_number' failed. 
+
+
+
+
+#5 
+
+I tested it and the problem still persists. Is it possible to have the main app
+  window load, and instead of having a prompt, the main window shows this text with
+  a button if no project file is chosen ? 
