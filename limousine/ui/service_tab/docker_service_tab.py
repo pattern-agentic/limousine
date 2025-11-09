@@ -21,14 +21,16 @@ class DockerServiceTab(ttk.Frame):
         parent,
         docker_service: DockerService,
         service_name: str,
-        project_root: Path,
+        project_path: Path,
         state_manager: StateManager,
+        tab_manager=None
     ):
         super().__init__(parent, padding=10)
         self.docker_service = docker_service
         self.service_name = service_name
-        self.project_root = project_root
+        self.project_path = project_path
         self.state_manager = state_manager
+        self.tab_manager = tab_manager
 
         self.command_names = list(docker_service.commands.keys())
         self.current_command = self.command_names[0] if self.command_names else None
@@ -97,6 +99,9 @@ class DockerServiceTab(ttk.Frame):
         if not self.current_command:
             self.status_label.config(text="N/A", foreground="gray")
             self.start_stop_button.config(state=tk.DISABLED)
+            if self.tab_manager:
+                tab_id = f"docker:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, False)
             return
 
         process_state = self.state_manager.get_docker_service_state(
@@ -133,9 +138,15 @@ class DockerServiceTab(ttk.Frame):
                 self.start_stop_button.config(text="Stop")
             if not self.stream_thread or not self.stream_thread.is_alive():
                 self.start_log_streaming()
+            if self.tab_manager:
+                tab_id = f"docker:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, True)
         else:
             self.start_stop_button.config(text="Start")
             self.stop_log_streaming()
+            if self.tab_manager:
+                tab_id = f"docker:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, False)
 
     def on_start_stop_clicked(self):
         if not self.current_command:
@@ -160,7 +171,7 @@ class DockerServiceTab(ttk.Frame):
                 self.docker_service,
                 self.service_name,
                 self.current_command,
-                self.project_root,
+                self.project_path,
                 self.state_manager,
             )
 
@@ -187,7 +198,7 @@ class DockerServiceTab(ttk.Frame):
             success = stop_docker_service(
                 self.service_name,
                 self.current_command,
-                self.project_root,
+                self.project_path,
                 self.state_manager,
             )
 

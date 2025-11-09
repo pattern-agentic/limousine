@@ -19,15 +19,17 @@ class ServiceTab(ttk.Frame):
         module: Module,
         service_name: str,
         service: Service,
-        project_root: Path,
+        project_path: Path,
         state_manager: StateManager,
+        tab_manager=None,
     ):
         super().__init__(parent, padding=10)
         self.module = module
         self.service_name = service_name
         self.service = service
-        self.project_root = project_root
+        self.project_path = project_path
         self.state_manager = state_manager
+        self.tab_manager = tab_manager
 
         self.command_names = list(service.commands.keys())
         self.current_command = self.command_names[0] if self.command_names else None
@@ -80,6 +82,11 @@ class ServiceTab(ttk.Frame):
         )
         self.clear_button.pack(side=tk.LEFT, padx=5)
 
+        menu_button = ttk.Button(
+            control_frame, text="⋮", width=3, command=self.show_env_menu
+        )
+        menu_button.pack(side=tk.RIGHT, padx=5)
+
     def create_log_viewer(self):
         log_frame = ttk.LabelFrame(self, text="Logs", padding=10)
         log_frame.pack(fill=tk.BOTH, expand=True)
@@ -96,6 +103,9 @@ class ServiceTab(ttk.Frame):
         if not self.current_command:
             self.status_label.config(text="N/A", foreground="gray")
             self.start_stop_button.config(state=tk.DISABLED)
+            if self.tab_manager:
+                tab_id = f"{self.module.name}:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, False)
             return
 
         status = get_service_status(
@@ -122,9 +132,15 @@ class ServiceTab(ttk.Frame):
                 self.start_stop_button.config(text="Stop")
             if not self.stream_thread or not self.stream_thread.is_alive():
                 self.start_log_streaming()
+            if self.tab_manager:
+                tab_id = f"{self.module.name}:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, True)
         else:
             self.start_stop_button.config(text="Start")
             self.stop_log_streaming()
+            if self.tab_manager:
+                tab_id = f"{self.module.name}:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, False)
 
     def on_start_stop_clicked(self):
         if not self.current_command:
@@ -152,7 +168,7 @@ class ServiceTab(ttk.Frame):
                 self.module,
                 self.service_name,
                 self.current_command,
-                self.project_root,
+                self.project_path,
                 self.state_manager,
             )
 
@@ -180,7 +196,7 @@ class ServiceTab(ttk.Frame):
                 self.module.name,
                 self.service_name,
                 self.current_command,
-                self.project_root,
+                self.project_path,
                 self.state_manager,
             )
 
@@ -245,3 +261,23 @@ class ServiceTab(ttk.Frame):
             self.after(2000, poll)
 
         self.after(2000, poll)
+
+    def show_env_menu(self):
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Show env variables...", command=self.on_show_env_clicked)
+        menu.add_command(label="Show secrets...", command=self.on_show_secrets_clicked)
+
+        try:
+            menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
+        finally:
+            menu.grab_release()
+
+    def on_show_env_clicked(self):
+        from limousine.ui.dialogs.env_compare_dialog import EnvCompareDialog
+
+        EnvCompareDialog(self.winfo_toplevel(), self.module, self.project_path)
+
+    def on_show_secrets_clicked(self):
+        from limousine.ui.dialogs.secrets_compare_dialog import SecretsCompareDialog
+
+        SecretsCompareDialog(self.winfo_toplevel(), self.module, self.project_path)

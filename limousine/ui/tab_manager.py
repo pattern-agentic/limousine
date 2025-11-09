@@ -66,6 +66,7 @@ class TabManager:
                     service,
                     project_path,
                     self.state_manager,
+                    self,
                 )
 
                 self.service_tabs[tab_id] = service_tab
@@ -98,6 +99,7 @@ class TabManager:
                             service_name,
                             project_path,
                             self.state_manager,
+                            self
                         )
 
                         self.service_tabs[tab_id] = docker_service_tab
@@ -130,3 +132,18 @@ class TabManager:
 
     def get_tab_count(self) -> int:
         return len(self.service_tabs)
+
+    def update_tab_label(self, tab_id: str, is_running: bool) -> None:
+        if tab_id not in self.service_tabs:
+            return
+
+        tab = self.service_tabs[tab_id]
+        tab_index = self.notebook.index(tab)
+
+        base_text = tab_id
+        if is_running:
+            new_text = f"▶ {base_text}"
+        else:
+            new_text = base_text
+
+        self.notebook.tab(tab_index, text=new_text)

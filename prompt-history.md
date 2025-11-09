@@ -127,3 +127,35 @@ First time it is presed, a SIGINT is sent to the process and a message is logged
 
 Can you change the log views in the tabs so that they show a black background with white (mostly white) text, instead of black text on a  white background?
 
+
+# 10
+
+We have implemented this project together following the spec in @spec.md , following the plan from @implementation-plan.md and including
+  @plan-introspection.md . Here's a history of our conversation with various answers / modifications: @prompt-history.md . I'd like to make some
+  additional changes, they are here: @spec2-structure-change.md .
+
+
+# 11
+
+This looks really good. Can you add the following which was left
+unimplemented when spec-2 was implemented:
+
+add a dropdown at the top right of each service tab window (not for docker tabs) ( see @limousine/ui/service_tab/service_tab.py ) that shows  `Show env variables...` and `Show secrets...` . 
+
+**Show env variables dialog**
+
+This dialog should open in a new window (and live in a new source
+file). It should show side-by-side views of the active and source env
+files. If the active file it shows a notice `env file missing, copy
+from {source-env-file}?`.
+
+**Show secrets dialogic**
+
+Similarly, this dialog should open in a new window and live in a
+separate soruce file. It should show die-by-side views of the active
+and source secret files.
+
+**Running indication**
+
+Can you also add a running indicator to each tab ? If it's running, it should get a  "▶" (U+25B6) character as the prefix. 
+
