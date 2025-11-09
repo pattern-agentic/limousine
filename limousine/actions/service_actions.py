@@ -15,7 +15,7 @@ def start_service(
     module: Module,
     service_name: str,
     command_name: str,
-    project_root: Path,
+    project_path: Path,
     state_manager: StateManager,
 ) -> ProcessState:
     service = module.services.get(service_name)
@@ -26,29 +26,28 @@ def start_service(
     if not command:
         return ProcessState(state="failed", last_error=f"Command {command_name} not found")
 
-    working_dir = resolve_path(module.clone_path, project_root)
-    if not working_dir.exists():
+    if not project_path.exists():
         return ProcessState(
-            state="failed", last_error=f"Module not cloned at {working_dir}"
+            state="failed", last_error=f"Project not found at {project_path}"
         )
 
     env_vars = dict(os.environ)
     if module.config:
         if module.config.active_env_file:
-            env_file = working_dir / module.config.active_env_file
+            env_file = project_path / module.config.active_env_file
             secrets_file = None
             if module.config.secrets_file:
-                secrets_file = working_dir / module.config.secrets_file
+                secrets_file = project_path / module.config.secrets_file
             env_vars = merge_env_vars(env_vars, env_file, secrets_file)
 
-    limousine_dir = get_limousine_dir(project_root)
+    limousine_dir = get_limousine_dir(project_path)
     pids_dir = limousine_dir / "pids"
 
     process_state = start_command(
         service_name=f"{module.name}_{service_name}",
         command_name=command_name,
         command=command,
-        working_dir=working_dir,
+        working_dir=project_path,
         env_vars=env_vars,
         pids_dir=pids_dir,
     )
@@ -64,7 +63,7 @@ def stop_service(
     module_name: str,
     service_name: str,
     command_name: str,
-    project_root: Path,
+    project_path: Path,
     state_manager: StateManager,
 ) -> bool:
     process_state = state_manager.get_service_state(
@@ -75,7 +74,7 @@ def stop_service(
         logger.warning(f"No running process for {module_name}:{service_name}:{command_name}")
         return False
 
-    limousine_dir = get_limousine_dir(project_root)
+    limousine_dir = get_limousine_dir(project_path)
     pids_dir = limousine_dir / "pids"
     pidfile = pids_dir / f"{module_name}_{service_name}_{command_name}.pid"
 
@@ -131,7 +130,7 @@ def start_docker_service(
     docker_service: DockerService,
     service_name: str,
     command_name: str,
-    project_root: Path,
+    project_path: Path,
     state_manager: StateManager,
 ) -> ProcessState:
     command = docker_service.commands.get(command_name)
@@ -141,14 +140,14 @@ def start_docker_service(
         )
 
     env_vars = dict(os.environ)
-    limousine_dir = get_limousine_dir(project_root)
+    limousine_dir = get_limousine_dir(project_path)
     pids_dir = limousine_dir / "pids"
 
     process_state = start_command(
         service_name=f"docker_{service_name}",
         command_name=command_name,
         command=command,
-        working_dir=project_root,
+        working_dir=project_path,
         env_vars=env_vars,
         pids_dir=pids_dir,
     )
@@ -161,7 +160,7 @@ def start_docker_service(
 def stop_docker_service(
     service_name: str,
     command_name: str,
-    project_root: Path,
+    project_path: Path,
     state_manager: StateManager,
 ) -> bool:
     process_state = state_manager.get_docker_service_state(service_name, command_name)
@@ -170,7 +169,7 @@ def stop_docker_service(
         logger.warning(f"No running process for docker:{service_name}:{command_name}")
         return False
 
-    limousine_dir = get_limousine_dir(project_root)
+    limousine_dir = get_limousine_dir(project_path)
     pids_dir = limousine_dir / "pids"
     pidfile = pids_dir / f"docker_{service_name}_{command_name}.pid"
 

@@ -22,8 +22,8 @@ def load_global_config() -> GlobalConfig:
     try:
         with open(config_path, "r") as f:
             data = json.load(f)
-            projects = [Path(p) for p in data.get("projects", [])]
-            return GlobalConfig(projects=projects)
+            workspaces = [Path(p) for p in data.get("limousine-workspaces", [])]
+            return GlobalConfig(workspaces=workspaces)
     except Exception as e:
         logger.error(f"Failed to load global config: {e}", exc_info=True)
         return GlobalConfig()
@@ -34,7 +34,7 @@ def save_global_config(config: GlobalConfig) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        data = {"projects": [str(p) for p in config.projects]}
+        data = {"limousine-workspaces": [str(p) for p in config.workspaces]}
         with open(config_path, "w") as f:
             json.dump(data, f, indent=2)
         logger.info(f"Saved global config to {config_path}")

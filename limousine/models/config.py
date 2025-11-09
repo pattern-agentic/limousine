@@ -23,10 +23,16 @@ class DockerService:
 @dataclass
 class Module:
     name: str
-    git_repo_url: str
-    clone_path: str
     services: dict[str, Service]
     config: ModuleConfig | None = None
+
+
+@dataclass
+class Project:
+    name: str
+    path_on_disk: str
+    optional_git_repo_url: str | None = None
+    exists_on_disk: bool = False
 
 
 @dataclass
@@ -36,5 +42,11 @@ class ProjectConfig:
 
 
 @dataclass
+class WorkspaceConfig:
+    name: str
+    projects: dict[str, Project] = field(default_factory=dict)
+
+
+@dataclass
 class GlobalConfig:
-    projects: list[Path] = field(default_factory=list)
+    workspaces: list[Path] = field(default_factory=list)

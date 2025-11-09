@@ -35,8 +35,6 @@ def load_project_config(path: Path) -> ProjectConfig:
 
             modules[name] = Module(
                 name=name,
-                git_repo_url=mod_data["git-repo-url"],
-                clone_path=mod_data["clone-path"],
                 services=services,
                 config=module_config,
             )
@@ -63,8 +61,6 @@ def save_project_config(config: ProjectConfig, path: Path) -> None:
                 services_data[svc_name] = {"commands": service.commands}
 
             mod_dict = {
-                "git-repo-url": module.git_repo_url,
-                "clone-path": module.clone_path,
                 "services": services_data,
             }
 
@@ -96,17 +92,9 @@ def save_project_config(config: ProjectConfig, path: Path) -> None:
 
 def validate_project_config(config: ProjectConfig) -> bool:
     try:
-        if not config.modules:
-            logger.warning("Project config has no modules")
+        if not config.modules and not config.docker_services:
+            logger.warning("Project config has no modules or docker services")
             return False
-
-        for name, module in config.modules.items():
-            if not module.git_repo_url:
-                logger.error(f"Module {name} missing git-repo-url")
-                return False
-            if not module.clone_path:
-                logger.error(f"Module {name} missing clone-path")
-                return False
 
         return True
 

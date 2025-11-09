@@ -8,14 +8,12 @@ from limousine.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def update_env_files(module: Module, project_root: Path) -> dict:
+def update_env_files(module: Module, project_path: Path) -> dict:
     if not module.config:
         return {"success": False, "error": "Module has no env configuration"}
 
-    clone_path = resolve_path(module.clone_path, project_root)
-
-    if not clone_path.exists():
-        return {"success": False, "error": "Module not cloned"}
+    if not project_path.exists():
+        return {"success": False, "error": "Project not found"}
 
     source_file = module.config.source_env_file
     active_file = module.config.active_env_file
@@ -23,8 +21,8 @@ def update_env_files(module: Module, project_root: Path) -> dict:
     if not source_file or not active_file:
         return {"success": False, "error": "Env file paths not configured"}
 
-    source_path = clone_path / source_file
-    active_path = clone_path / active_file
+    source_path = project_path / source_file
+    active_path = project_path / active_file
 
     if not source_path.exists():
         return {"success": False, "error": f"Source file not found: {source_file}"}
@@ -32,8 +30,8 @@ def update_env_files(module: Module, project_root: Path) -> dict:
     result = merge_env_files(source_path, active_path)
 
     if module.config.secrets_file and module.config.secrets_example_file:
-        secrets_path = clone_path / module.config.secrets_file
-        secrets_example_path = clone_path / module.config.secrets_example_file
+        secrets_path = project_path / module.config.secrets_file
+        secrets_example_path = project_path / module.config.secrets_example_file
 
         warnings = check_secrets_mismatch(secrets_path, secrets_example_path)
         result["secrets_warnings"] = warnings

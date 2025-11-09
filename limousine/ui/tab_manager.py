@@ -1,6 +1,5 @@
 from tkinter import ttk
 from pathlib import Path
-from limousine.models.config import ProjectConfig
 from limousine.state_manager import StateManager
 from limousine.ui.service_tab.service_tab import ServiceTab
 from limousine.ui.service_tab.docker_service_tab import DockerServiceTab
@@ -14,13 +13,9 @@ class TabManager:
     def __init__(
         self,
         notebook: ttk.Notebook,
-        project_config: ProjectConfig,
-        project_root: Path,
         state_manager: StateManager,
     ):
         self.notebook = notebook
-        self.project_config = project_config
-        self.project_root = project_root
         self.state_manager = state_manager
         self.service_tabs: dict[str, ttk.Frame] = {}
 
@@ -33,7 +28,12 @@ class TabManager:
             self.switch_to_tab(tab_id)
             return
 
-        module = self.project_config.modules.get(module_name)
+        project_config = self.state_manager.get_project_config_for_module(module_name)
+        if not project_config:
+            logger.error(f"Project config not found for module {module_name}")
+            return
+
+        module = project_config.modules.get(module_name)
         if not module:
             logger.error(f"Module {module_name} not found")
             return
@@ -41,6 +41,11 @@ class TabManager:
         service = module.services.get(service_name)
         if not service:
             logger.error(f"Service {service_name} not found in module {module_name}")
+            return
+
+        project_path = self.state_manager.get_project_path_for_module(module_name)
+        if not project_path:
+            logger.error(f"Project path not found for module {module_name}")
             return
 
         progress = None
@@ -59,7 +64,7 @@ class TabManager:
                     module,
                     service_name,
                     service,
-                    self.project_root,
+                    project_path,
                     self.state_manager,
                 )
 
@@ -80,23 +85,28 @@ class TabManager:
             self.switch_to_tab(tab_id)
             return
 
-        docker_service = self.project_config.docker_services.get(service_name)
-        if not docker_service:
-            logger.error(f"Docker service {service_name} not found")
-            return
+        for project_config in self.state_manager.project_configs.values():
+            docker_service = project_config.docker_services.get(service_name)
+            if docker_service:
+                for project_state in self.state_manager.app_state.projects.values():
+                    if service_name in project_state.docker_services:
+                        project_path = Path(project_state.path_on_disk)
 
-        docker_service_tab = DockerServiceTab(
-            self.notebook,
-            docker_service,
-            service_name,
-            self.project_root,
-            self.state_manager,
-        )
+                        docker_service_tab = DockerServiceTab(
+                            self.notebook,
+                            docker_service,
+                            service_name,
+                            project_path,
+                            self.state_manager,
+                        )
 
-        self.service_tabs[tab_id] = docker_service_tab
-        self.notebook.add(docker_service_tab, text=f"docker:{service_name}")
+                        self.service_tabs[tab_id] = docker_service_tab
+                        self.notebook.add(docker_service_tab, text=f"docker:{service_name}")
 
-        logger.info(f"Created docker service tab: {service_name}")
+                        logger.info(f"Created docker service tab: {service_name}")
+                        return
+
+        logger.error(f"Docker service {service_name} not found")
 
     def remove_tab(self, tab_id: str) -> None:
         if tab_id not in self.service_tabs:

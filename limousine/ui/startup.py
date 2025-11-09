@@ -8,9 +8,9 @@ from limousine.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def show_project_selector(root: tk.Tk, projects: list[Path]) -> Path | None:
+def show_workspace_selector(root: tk.Tk, workspaces: list[Path]) -> Path | None:
     dialog = tk.Toplevel(root)
-    dialog.title("Select Project")
+    dialog.title("Select Workspace")
     dialog.geometry("500x400")
 
     root_visible = root.winfo_viewable()
@@ -19,12 +19,12 @@ def show_project_selector(root: tk.Tk, projects: list[Path]) -> Path | None:
 
     dialog.grab_set()
 
-    selected_project = None
+    selected_workspace = None
 
     frame = ttk.Frame(dialog, padding=10)
     frame.pack(fill=tk.BOTH, expand=True)
 
-    ttk.Label(frame, text="Select a project to open:", font=("", 12, "bold")).pack(
+    ttk.Label(frame, text="Select a workspace to open:", font=("", 12, "bold")).pack(
         pady=(0, 10)
     )
 
@@ -40,24 +40,24 @@ def show_project_selector(root: tk.Tk, projects: list[Path]) -> Path | None:
     listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.config(command=listbox.yview)
 
-    for project in projects:
-        listbox.insert(tk.END, str(project))
+    for workspace in workspaces:
+        listbox.insert(tk.END, str(workspace))
 
     def on_select():
-        nonlocal selected_project
+        nonlocal selected_workspace
         selection = listbox.curselection()
         if selection:
-            selected_project = projects[selection[0]]
+            selected_workspace = workspaces[selection[0]]
             dialog.destroy()
 
     def on_browse():
-        nonlocal selected_project
+        nonlocal selected_workspace
         file_path = filedialog.askopenfilename(
-            title="Select .limousine-proj file",
-            filetypes=[("Limousine Project", "*.limousine-proj"), ("All files", "*.*")],
+            title="Select .limousine.wksp file",
+            filetypes=[("Limousine Workspace", "*.limousine.wksp"), ("All files", "*.*")],
         )
         if file_path:
-            selected_project = Path(file_path)
+            selected_workspace = Path(file_path)
             dialog.destroy()
 
     def on_double_click(event):
@@ -87,18 +87,18 @@ def show_project_selector(root: tk.Tk, projects: list[Path]) -> Path | None:
         dialog.geometry(f"+{x}+{y}")
 
     dialog.wait_window()
-    return selected_project
+    return selected_workspace
 
 
 def handle_first_run(root: tk.Tk) -> Path | None:
     messagebox.showinfo(
         "Welcome to Limousine",
-        "Welcome to Limousine!\n\nPlease select a .limousine-proj file to get started.",
+        "Welcome to Limousine!\n\nPlease select a .limousine.wksp file to get started.",
     )
 
     file_path = filedialog.askopenfilename(
-        title="Select .limousine-proj file",
-        filetypes=[("Limousine Project", "*.limousine-proj"), ("All files", "*.*")],
+        title="Select .limousine.wksp file",
+        filetypes=[("Limousine Workspace", "*.limousine.wksp"), ("All files", "*.*")],
     )
 
     if file_path:
@@ -107,16 +107,16 @@ def handle_first_run(root: tk.Tk) -> Path | None:
     return None
 
 
-def load_or_select_project(root: tk.Tk) -> Path | None:
+def load_or_select_workspace(root: tk.Tk) -> Path | None:
     global_config = load_global_config()
 
-    if not global_config.projects:
+    if not global_config.workspaces:
         return handle_first_run(root)
 
-    project_path = show_project_selector(root, global_config.projects)
+    workspace_path = show_workspace_selector(root, global_config.workspaces)
 
-    if project_path and project_path not in global_config.projects:
-        global_config.projects.append(project_path)
+    if workspace_path and workspace_path not in global_config.workspaces:
+        global_config.workspaces.append(workspace_path)
         save_global_config(global_config)
 
-    return project_path
+    return workspace_path

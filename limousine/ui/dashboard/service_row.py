@@ -16,7 +16,7 @@ class ServiceRow(ttk.Frame):
         module: Module,
         service_name: str,
         service: Service,
-        project_root: Path,
+        project_path: Path,
         state_manager: StateManager,
         tab_manager=None,
     ):
@@ -24,7 +24,7 @@ class ServiceRow(ttk.Frame):
         self.module = module
         self.service_name = service_name
         self.service = service
-        self.project_root = project_root
+        self.project_path = project_path
         self.state_manager = state_manager
         self.tab_manager = tab_manager
 
@@ -126,7 +126,7 @@ class ServiceRow(ttk.Frame):
                 self.module,
                 self.service_name,
                 self.current_command,
-                self.project_root,
+                self.project_path,
                 self.state_manager,
             )
 
@@ -153,7 +153,7 @@ class ServiceRow(ttk.Frame):
                 self.module.name,
                 self.service_name,
                 self.current_command,
-                self.project_root,
+                self.project_path,
                 self.state_manager,
             )
 

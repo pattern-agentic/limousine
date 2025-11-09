@@ -1,8 +1,15 @@
 from pathlib import Path
 from typing import Callable
-from limousine.models.config import ProjectConfig
-from limousine.models.state import AppState, ModuleState, ServiceState, ProcessState
+from limousine.models.config import ProjectConfig, WorkspaceConfig
+from limousine.models.state import (
+    AppState,
+    ModuleState,
+    ServiceState,
+    ProcessState,
+    ProjectState,
+)
 from limousine.storage.project_config import load_project_config
+from limousine.storage.workspace_config import load_workspace_config
 from limousine.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -11,24 +18,59 @@ logger = get_logger(__name__)
 class StateManager:
     def __init__(self):
         self.app_state: AppState = AppState()
-        self.project_config: ProjectConfig | None = None
+        self.workspace_config: WorkspaceConfig | None = None
+        self.project_configs: dict[str, ProjectConfig] = {}
         self.subscribers: list[Callable] = []
 
-    def load_project(self, project_path: Path) -> None:
-        logger.info(f"Loading project from {project_path}")
-        self.project_config = load_project_config(project_path)
-        self.app_state.current_project_file = project_path
+    def load_workspace(self, workspace_path: Path) -> None:
+        logger.info(f"Loading workspace from {workspace_path}")
+        self.workspace_config = load_workspace_config(workspace_path)
+        self.app_state.current_workspace_file = workspace_path
 
+        self.app_state.projects = {}
         self.app_state.modules = {}
-        for module_name, module in self.project_config.modules.items():
-            services = {}
-            for service_name in module.services.keys():
-                services[service_name] = ServiceState()
-            self.app_state.modules[module_name] = ModuleState(services=services)
-
         self.app_state.docker_services = {}
-        for docker_service_name in self.project_config.docker_services.keys():
-            self.app_state.docker_services[docker_service_name] = ServiceState()
+
+        for project_name, project in self.workspace_config.projects.items():
+            project_state = ProjectState(
+                path_on_disk=project.path_on_disk,
+                optional_git_repo_url=project.optional_git_repo_url,
+                exists_on_disk=project.exists_on_disk,
+            )
+
+            if project.exists_on_disk:
+                proj_config_path = Path(project.path_on_disk) / ".limousine-proj"
+                if proj_config_path.exists():
+                    try:
+                        proj_config = load_project_config(proj_config_path)
+                        self.project_configs[project_name] = proj_config
+
+                        for module_name, module in proj_config.modules.items():
+                            services = {}
+                            for service_name in module.services.keys():
+                                services[service_name] = ServiceState()
+                            module_state = ModuleState(
+                                services=services, project_name=project_name
+                            )
+                            self.app_state.modules[module_name] = module_state
+                            project_state.modules[module_name] = module_state
+
+                        for docker_service_name in proj_config.docker_services.keys():
+                            docker_service_state = ServiceState()
+                            self.app_state.docker_services[
+                                docker_service_name
+                            ] = docker_service_state
+                            project_state.docker_services[
+                                docker_service_name
+                            ] = docker_service_state
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to load project config from {proj_config_path}: {e}",
+                            exc_info=True,
+                        )
+
+            self.app_state.projects[project_name] = project_state
 
         self._notify_subscribers()
 
@@ -79,6 +121,23 @@ class StateManager:
 
         service_state.command_states[command_name] = state
         self._notify_subscribers()
+
+    def get_project_path_for_module(self, module_name: str) -> Path | None:
+        module_state = self.app_state.modules.get(module_name)
+        if not module_state or not module_state.project_name:
+            return None
+
+        project_state = self.app_state.projects.get(module_state.project_name)
+        if not project_state:
+            return None
+
+        return Path(project_state.path_on_disk)
+
+    def get_project_config_for_module(self, module_name: str) -> ProjectConfig | None:
+        module_state = self.app_state.modules.get(module_name)
+        if not module_state or not module_state.project_name:
+            return None
+        return self.project_configs.get(module_state.project_name)
 
     def subscribe_to_changes(self, callback: Callable) -> None:
         self.subscribers.append(callback)

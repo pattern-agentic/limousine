@@ -36,11 +36,21 @@ class ServiceState:
 @dataclass
 class ModuleState:
     services: dict[str, ServiceState]
-    source_state: SourceState = field(default_factory=SourceState)
+    project_name: str | None = None
+
+
+@dataclass
+class ProjectState:
+    path_on_disk: str
+    optional_git_repo_url: str | None = None
+    exists_on_disk: bool = False
+    modules: dict[str, ModuleState] = field(default_factory=dict)
+    docker_services: dict[str, ServiceState] = field(default_factory=dict)
 
 
 @dataclass
 class AppState:
-    current_project_file: Path | None = None
+    current_workspace_file: Path | None = None
+    projects: dict[str, ProjectState] = field(default_factory=dict)
     modules: dict[str, ModuleState] = field(default_factory=dict)
     docker_services: dict[str, ServiceState] = field(default_factory=dict)
