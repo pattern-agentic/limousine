@@ -39,7 +39,7 @@ class StateManager:
             )
 
             if project.exists_on_disk:
-                proj_config_path = Path(project.path_on_disk) / ".limousine-proj"
+                proj_config_path = Path(project.path_on_disk) / "limousine.proj"
                 if proj_config_path.exists():
                     try:
                         proj_config = load_project_config(proj_config_path)

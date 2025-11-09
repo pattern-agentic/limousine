@@ -53,8 +53,8 @@ def show_workspace_selector(root: tk.Tk, workspaces: list[Path]) -> Path | None:
     def on_browse():
         nonlocal selected_workspace
         file_path = filedialog.askopenfilename(
-            title="Select .limousine.wksp file",
-            filetypes=[("Limousine Workspace", "*.limousine.wksp"), ("All files", "*.*")],
+            title="Select limousine.wksp file",
+            filetypes=[("Limousine Workspace", "*limousine.wksp"), ("All files", "*.*")],
         )
         if file_path:
             selected_workspace = Path(file_path)
@@ -93,12 +93,12 @@ def show_workspace_selector(root: tk.Tk, workspaces: list[Path]) -> Path | None:
 def handle_first_run(root: tk.Tk) -> Path | None:
     messagebox.showinfo(
         "Welcome to Limousine",
-        "Welcome to Limousine!\n\nPlease select a .limousine.wksp file to get started.",
+        "Welcome to Limousine!\n\nPlease select a limousine.wksp file to get started.",
     )
 
     file_path = filedialog.askopenfilename(
-        title="Select .limousine.wksp file",
-        filetypes=[("Limousine Workspace", "*.limousine.wksp"), ("All files", "*.*")],
+        title="Select limousine.wksp file",
+        filetypes=[("Limousine Workspace", "*limousine.wksp"), ("All files", "*.*")],
     )
 
     if file_path:

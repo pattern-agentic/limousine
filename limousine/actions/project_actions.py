@@ -48,7 +48,7 @@ def check_project_exists(project: Project) -> bool:
     project_path = Path(project.path_on_disk)
     exists = project_path.exists() and project_path.is_dir()
 
-    if exists and (project_path / ".limousine-proj").exists():
+    if exists and (project_path / "limousine.proj").exists():
         return True
 
     return exists

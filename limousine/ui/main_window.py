@@ -72,8 +72,8 @@ class MainWindow(ttk.Frame):
 
     def switch_workspace(self):
         file_path = filedialog.askopenfilename(
-            title="Select .limousine.wksp file",
-            filetypes=[("Limousine Workspace", "*.limousine.wksp"), ("All files", "*.*")],
+            title="Select limousine.wksp file",
+            filetypes=[("Limousine Workspace", "*limousine.wksp"), ("All files", "*.*")],
         )
 
         if file_path:
