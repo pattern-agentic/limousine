@@ -8,6 +8,21 @@
     
     ./venv/bin/python -m limousine.m
 
+On macOS, may need to install tkinter:
+
+    brew install python-tk
+
+Things can go wrong with TCL/TK version mismatches. The app prints out
+the tcl/tk version it uses when it runs.
+
+On linux, find the version of tcl tk:
+
+    find /usr -name init.tcl
+    find ~ -name init.tcl
+    
+    cat /usr/share/tcltk/tcl8.6/init.tcl | grep Tcl # should be ~8.6.xx
+    
+
 
 ### Project file structure
 
