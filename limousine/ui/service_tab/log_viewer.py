@@ -16,6 +16,7 @@ class LogViewer(scrolledtext.ScrolledText):
         )
         self.auto_scroll_enabled = True
         self.max_lines = 5000
+        self.font_size = 9
 
     def append_line(self, text: str) -> None:
         self.config(state=tk.NORMAL)
@@ -61,3 +62,15 @@ class LogViewer(scrolledtext.ScrolledText):
 
     def set_max_lines(self, max_lines: int) -> None:
         self.max_lines = max_lines
+
+    def increase_font_size(self) -> None:
+        self.font_size += 1
+        self.config(font=("Courier", self.font_size))
+
+    def decrease_font_size(self) -> None:
+        if self.font_size > 6:
+            self.font_size -= 1
+            self.config(font=("Courier", self.font_size))
+
+    def add_separator(self) -> None:
+        self.append_line("\n-----------------------------------\n")
