@@ -10,6 +10,7 @@ from limousine.models.state import (
 )
 from limousine.storage.project_config import load_project_config
 from limousine.storage.workspace_config import load_workspace_config
+from limousine.process.recovery import scan_for_orphaned_processes
 from limousine.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -45,18 +46,46 @@ class StateManager:
                         proj_config = load_project_config(proj_config_path)
                         self.project_configs[project_name] = proj_config
 
+                        project_root = Path(project.path_on_disk)
+                        pids_dir = project_root / ".limousine" / "pids"
+                        orphaned = scan_for_orphaned_processes(pids_dir)
+
                         for module_name, module in proj_config.modules.items():
                             services = {}
-                            for service_name in module.services.keys():
-                                services[service_name] = ServiceState()
+                            for service_name, service in module.services.items():
+                                service_state = ServiceState()
+
+                                for cmd_name in service.commands.keys():
+                                    pidfile_key = f"{module_name}_{service_name}_{cmd_name}"
+                                    if pidfile_key in orphaned:
+                                        pid = orphaned[pidfile_key]
+                                        service_state.command_states[cmd_name] = ProcessState(
+                                            state="orphaned",
+                                            pid=pid,
+                                            start_time=None,
+                                        )
+
+                                services[service_name] = service_state
+
                             module_state = ModuleState(
                                 services=services, project_name=project_name
                             )
                             self.app_state.modules[module_name] = module_state
                             project_state.modules[module_name] = module_state
 
-                        for docker_service_name in proj_config.docker_services.keys():
+                        for docker_service_name, docker_service in proj_config.docker_services.items():
                             docker_service_state = ServiceState()
+
+                            for cmd_name in docker_service.commands.keys():
+                                pidfile_key = f"docker_{docker_service_name}_{cmd_name}"
+                                if pidfile_key in orphaned:
+                                    pid = orphaned[pidfile_key]
+                                    docker_service_state.command_states[cmd_name] = ProcessState(
+                                        state="orphaned",
+                                        pid=pid,
+                                        start_time=None,
+                                    )
+
                             self.app_state.docker_services[
                                 docker_service_name
                             ] = docker_service_state

@@ -131,6 +131,8 @@ class ServiceTab(ttk.Frame):
             self.status_label.config(text=status, foreground="green")
         elif status == "stopped":
             self.status_label.config(text=status, foreground="dark yellow")
+        elif status == "orphaned":
+            self.status_label.config(text=status, foreground="orange")
         else:
             self.status_label.config(text=status, foreground="gray")
 
@@ -147,6 +149,12 @@ class ServiceTab(ttk.Frame):
             if self.tab_manager:
                 tab_id = f"{self.module.name}:{self.service_name}"
                 self.tab_manager.update_tab_label(tab_id, True)
+        elif status == "orphaned":
+            self.start_stop_button.config(text="Kill")
+            self.stop_log_streaming()
+            if self.tab_manager:
+                tab_id = f"{self.module.name}:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, False)
         else:
             self.start_stop_button.config(text="Start")
             self.stop_log_streaming()
@@ -165,7 +173,7 @@ class ServiceTab(ttk.Frame):
             self.state_manager,
         )
 
-        if status == "running":
+        if status == "running" or status == "orphaned":
             self.on_stop_clicked()
         else:
             self.on_start_clicked()

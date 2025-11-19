@@ -43,6 +43,37 @@ def prompt_kill_process(service_name: str, pid: int) -> bool:
     return result
 
 
+def scan_for_orphaned_processes(pids_dir: Path) -> dict[str, int]:
+    if not pids_dir.exists():
+        return {}
+
+    orphaned = {}
+    stale_pidfiles = []
+
+    for pidfile in pids_dir.glob("*.pid"):
+        pid = read_pidfile(pidfile)
+
+        if pid is None:
+            logger.info(f"Found invalid pidfile: {pidfile.name}")
+            stale_pidfiles.append(pidfile)
+            continue
+
+        if check_process_running(pid):
+            orphaned[pidfile.stem] = pid
+            logger.info(f"Found orphaned process: {pidfile.name} (PID {pid})")
+        else:
+            logger.info(f"Found stale pidfile: {pidfile.name} (PID {pid})")
+            stale_pidfiles.append(pidfile)
+
+    for pidfile in stale_pidfiles:
+        remove_pidfile(pidfile)
+
+    if orphaned:
+        logger.info(f"Found {len(orphaned)} orphaned process(es)")
+
+    return orphaned
+
+
 def cleanup_crashed_processes(pids_dir: Path) -> int:
     if not pids_dir.exists():
         return 0
