@@ -159,3 +159,26 @@ and source secret files.
 
 Can you also add a running indicator to each tab ? If it's running, it should get a  "▶" (U+25B6) character as the prefix. 
 
+#12
+
+Can you add buttons to @limousine/ui/service_tab/service_tab.py to make the logs text size bigger and smaller, and also to add a line break to the 
+log ("\n-----------------------------------\n") 
+
+
+# 13
+
+there is some functionality for example in
+@limousine/process/recovery.py that's meant to handle the app starting
+and command_state contaiing pids from previously running orphaned
+processes. However it doesn't seem to have gotten wired into the
+application. I can see the pid files on disk if I kill the app with
+services still running, however when the app starts back up, all
+services show status `unknown`, which I believe means there's no
+command state. Can you wire it through so that the command state gets
+loaded from disk (or initialized with pids from disk) on startup, and
+if a service has been orphaned and its pid is still there, the app
+will show the status as "orphaned" and present a button to kill it?
+See @spec.md @spec2-structure-change.md @implementation-plan.md
+@plan-introspection.md @prompt-history.md for context.
+
+

@@ -82,6 +82,18 @@ class ServiceTab(ttk.Frame):
         )
         self.clear_button.pack(side=tk.LEFT, padx=5)
 
+        ttk.Button(
+            control_frame, text="A+", width=3, command=self.on_increase_font
+        ).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(
+            control_frame, text="A-", width=3, command=self.on_decrease_font
+        ).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(
+            control_frame, text="---", width=3, command=self.on_add_separator
+        ).pack(side=tk.LEFT, padx=2)
+
         menu_button = ttk.Button(
             control_frame, text="⋮", width=3, command=self.show_env_menu
         )
@@ -118,7 +130,9 @@ class ServiceTab(ttk.Frame):
         if status == "running":
             self.status_label.config(text=status, foreground="green")
         elif status == "stopped":
-            self.status_label.config(text=status, foreground="yellow")
+            self.status_label.config(text=status, foreground="dark yellow")
+        elif status == "orphaned":
+            self.status_label.config(text=status, foreground="orange")
         else:
             self.status_label.config(text=status, foreground="gray")
 
@@ -135,6 +149,12 @@ class ServiceTab(ttk.Frame):
             if self.tab_manager:
                 tab_id = f"{self.module.name}:{self.service_name}"
                 self.tab_manager.update_tab_label(tab_id, True)
+        elif status == "orphaned":
+            self.start_stop_button.config(text="Kill")
+            self.stop_log_streaming()
+            if self.tab_manager:
+                tab_id = f"{self.module.name}:{self.service_name}"
+                self.tab_manager.update_tab_label(tab_id, False)
         else:
             self.start_stop_button.config(text="Start")
             self.stop_log_streaming()
@@ -153,7 +173,7 @@ class ServiceTab(ttk.Frame):
             self.state_manager,
         )
 
-        if status == "running":
+        if status == "running" or status == "orphaned":
             self.on_stop_clicked()
         else:
             self.on_start_clicked()
@@ -252,6 +272,15 @@ class ServiceTab(ttk.Frame):
 
     def on_clear_logs(self):
         self.log_viewer.clear()
+
+    def on_increase_font(self):
+        self.log_viewer.increase_font_size()
+
+    def on_decrease_font(self):
+        self.log_viewer.decrease_font_size()
+
+    def on_add_separator(self):
+        self.log_viewer.add_separator()
 
     def start_status_polling(self):
         def poll():

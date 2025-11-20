@@ -113,6 +113,16 @@ def get_service_status(
     if not process_state:
         return "unknown"
 
+    if process_state.state == "orphaned":
+        if process_state.pid and check_process_running(process_state.pid):
+            return "orphaned"
+        else:
+            process_state.state = "stopped"
+            state_manager.update_service_state(
+                module_name, service_name, command_name, process_state
+            )
+            return "stopped"
+
     if process_state.state == "running" and process_state.pid:
         if check_process_running(process_state.pid):
             return "running"
@@ -189,3 +199,32 @@ def stop_docker_service(
         state_manager.update_docker_service_state(service_name, command_name, process_state)
 
     return success
+
+
+def get_docker_service_status(
+    service_name: str,
+    command_name: str,
+    state_manager: StateManager,
+) -> str:
+    process_state = state_manager.get_docker_service_state(service_name, command_name)
+
+    if not process_state:
+        return "unknown"
+
+    if process_state.state == "orphaned":
+        if process_state.pid and check_process_running(process_state.pid):
+            return "orphaned"
+        else:
+            process_state.state = "stopped"
+            state_manager.update_docker_service_state(service_name, command_name, process_state)
+            return "stopped"
+
+    if process_state.state == "running" and process_state.pid:
+        if check_process_running(process_state.pid):
+            return "running"
+        else:
+            process_state.state = "stopped"
+            state_manager.update_docker_service_state(service_name, command_name, process_state)
+            return "stopped"
+
+    return process_state.state
