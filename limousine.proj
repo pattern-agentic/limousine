@@ -1,0 +1,23 @@
+{
+  "modules": {
+    "sample-proj": {
+      "services": {
+        "web": {
+          "commands": {
+            "start": "npm run dev"
+          }
+        },
+        "nats": {
+          "commands": {
+            "start": "docker run --rm -t -p 4222:4222 -p 8222:8222 nats -js -sd /data -m 8222"
+          }
+        },
+        "postgres": {
+          "commands": {
+            "start": "docker run --rm -t --name postgres -p 5432:5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=$DB_PASSWORD -e POSTGRES_DB=sample-db postgres:15-alpine"
+          }
+        }
+      }
+    }
+  }
+}

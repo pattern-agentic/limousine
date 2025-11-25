@@ -1,0 +1,10 @@
+{
+  "name": "Sample App",
+  "projects": {
+    "sample-proj": {
+      "path-on-disk": ".",
+      "optional-git-repo-url": "git+ssh://git@github.com/example/sample-proj.git"
+    }
+  },
+  "collapsed-modules": []
+}
