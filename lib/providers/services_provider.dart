@@ -60,7 +60,7 @@ class ServiceStatesNotifier extends Notifier<Map<String, ServiceState>> {
 
     final pty = ProcessService.startPty(
       executable: shell,
-      arguments: ['-c', command],
+      arguments: ['-l', '-c', command],
       workingDirectory: info.projectPath,
       environment: env,
     );
