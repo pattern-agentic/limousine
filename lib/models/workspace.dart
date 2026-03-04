@@ -1,3 +1,5 @@
+import '../mcp/mcp_config.dart';
+
 class GlobalConfig {
   final List<String> workspacePaths;
 
@@ -21,12 +23,14 @@ class Workspace {
   final Map<String, ProjectRef> projects;
   final List<String> collapsedModules;
   final String? gitSshKeyPath;
+  final McpConfig? mcpConfig;
 
   Workspace({
     required this.name,
     required this.projects,
     this.collapsedModules = const [],
     this.gitSshKeyPath,
+    this.mcpConfig,
   });
 
   factory Workspace.fromJson(Map<String, dynamic> json) {
@@ -38,6 +42,7 @@ class Workspace {
       ),
       collapsedModules: List<String>.from(json['collapsed-modules'] ?? []),
       gitSshKeyPath: json['git-ssh-key-path'],
+      mcpConfig: json['mcp'] != null ? McpConfig.fromJson(json['mcp']) : null,
     );
   }
 
@@ -46,18 +51,21 @@ class Workspace {
     'projects': projects.map((k, v) => MapEntry(k, v.toJson())),
     'collapsed-modules': collapsedModules,
     if (gitSshKeyPath != null) 'git-ssh-key-path': gitSshKeyPath,
+    if (mcpConfig != null) 'mcp': mcpConfig!.toJson(),
   };
 
   Workspace copyWith({
     List<String>? collapsedModules,
     String? gitSshKeyPath,
     bool clearGitSshKeyPath = false,
+    McpConfig? mcpConfig,
   }) {
     return Workspace(
       name: name,
       projects: projects,
       collapsedModules: collapsedModules ?? this.collapsedModules,
       gitSshKeyPath: clearGitSshKeyPath ? null : (gitSshKeyPath ?? this.gitSshKeyPath),
+      mcpConfig: mcpConfig ?? this.mcpConfig,
     );
   }
 }

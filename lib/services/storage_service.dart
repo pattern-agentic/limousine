@@ -41,11 +41,15 @@ class StorageService {
   }
 
   static Future<Workspace> loadWorkspace(String path) async {
+    final file = File(path);
+    final content = await file.readAsString();
+    _log.info('Loading workspace from $path');
     try {
-      final file = File(path);
-      final content = await file.readAsString();
-      _log.info('Loading workspace from $path');
       return Workspace.fromJson(jsonDecode(content));
+    } on FormatException catch (e, st) {
+      final snippet = jsonErrorSnippet(content, e.offset);
+      _log.severe('Invalid JSON in $path:\n$snippet', e, st);
+      rethrow;
     } catch (e, st) {
       _log.severe('Failed to load workspace from $path', e, st);
       rethrow;
@@ -67,10 +71,14 @@ class StorageService {
   static Future<Project?> loadProject(String projectPath) async {
     final projFile = File(p.join(projectPath, 'limousine.proj'));
     if (!await projFile.exists()) return null;
+    final content = await projFile.readAsString();
+    _log.info('Loading project from ${projFile.path}');
     try {
-      final content = await projFile.readAsString();
-      _log.info('Loading project from ${projFile.path}');
       return Project.fromJson(jsonDecode(content));
+    } on FormatException catch (e, st) {
+      final snippet = jsonErrorSnippet(content, e.offset);
+      _log.severe('Invalid JSON in ${projFile.path}:\n$snippet', e, st);
+      rethrow;
     } catch (e, st) {
       _log.severe('Failed to load project from ${projFile.path}', e, st);
       rethrow;
@@ -143,5 +151,27 @@ class StorageService {
       }
     }
     return result;
+  }
+
+  static String jsonErrorSnippet(String content, int? offset) {
+    if (offset == null) return content.length > 200 ? '${content.substring(0, 200)}...' : content;
+    final lines = content.split('\n');
+    var charCount = 0;
+    var errorLine = 0;
+    for (var i = 0; i < lines.length; i++) {
+      charCount += lines[i].length + 1;
+      if (charCount > offset) {
+        errorLine = i;
+        break;
+      }
+    }
+    final start = (errorLine - 3).clamp(0, lines.length);
+    final end = (errorLine + 4).clamp(0, lines.length);
+    final numbered = <String>[];
+    for (var i = start; i < end; i++) {
+      final marker = i == errorLine ? '>>>' : '   ';
+      numbered.add('$marker ${i + 1} | ${lines[i]}');
+    }
+    return numbered.join('\n');
   }
 }

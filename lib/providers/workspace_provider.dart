@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import '../models/workspace.dart';
 import '../models/module.dart';
 import '../services/storage_service.dart';
@@ -22,6 +24,7 @@ class LoadedProject {
   final String? gitRepoUrl;
   final bool existsOnDisk;
   final Project? projectData;
+  final String? loadError;
 
   LoadedProject({
     required this.name,
@@ -29,6 +32,7 @@ class LoadedProject {
     this.gitRepoUrl,
     required this.existsOnDisk,
     this.projectData,
+    this.loadError,
   });
 }
 
@@ -50,8 +54,19 @@ class ProjectsNotifier extends AsyncNotifier<Map<String, LoadedProject>> {
         entry.value.pathOnDisk,
       );
       Project? projectData;
+      String? loadError;
       if (exists) {
-        projectData = await StorageService.loadProject(resolvedPath);
+        try {
+          projectData = await StorageService.loadProject(resolvedPath);
+        } on FormatException catch (e) {
+          final snippet = StorageService.jsonErrorSnippet(
+            await File(p.join(resolvedPath, 'limousine.proj')).readAsString(),
+            e.offset,
+          );
+          loadError = 'Invalid JSON in limousine.proj:\n$snippet';
+        } catch (e) {
+          loadError = 'Failed to load project: $e';
+        }
       }
       result[entry.key] = LoadedProject(
         name: entry.key,
@@ -59,6 +74,7 @@ class ProjectsNotifier extends AsyncNotifier<Map<String, LoadedProject>> {
         gitRepoUrl: entry.value.gitRepoUrl,
         existsOnDisk: exists,
         projectData: projectData,
+        loadError: loadError,
       );
     }
     return result;
