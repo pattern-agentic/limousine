@@ -5,8 +5,9 @@ final _log = Logger('Module');
 class Project {
   final List<Module> modules;
   final List<String> visibleTabs;
+  final String? agentGuide;
 
-  Project({required this.modules, this.visibleTabs = const []});
+  Project({required this.modules, this.visibleTabs = const [], this.agentGuide});
 
   factory Project.fromJson(Map<String, dynamic> json) {
     final modulesRaw = json['modules'];
@@ -25,12 +26,14 @@ class Project {
     return Project(
       modules: modules,
       visibleTabs: List<String>.from(json['visible-tabs'] ?? []),
+      agentGuide: json['agent-guide'],
     );
   }
 
   Map<String, dynamic> toJson() => {
     'modules': modules.map((m) => m.toJson()).toList(),
     if (visibleTabs.isNotEmpty) 'visible-tabs': visibleTabs,
+    if (agentGuide != null) 'agent-guide': agentGuide,
   };
 }
 

@@ -6,6 +6,7 @@ import '../../providers/services_provider.dart';
 import '../widgets/dashboard/dashboard_tab.dart';
 import '../widgets/service_tab/service_tab.dart';
 import '../widgets/dialogs/settings_dialog.dart';
+import '../widgets/mcp_status_indicator.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -88,6 +89,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                 const SizedBox(width: 8),
                 _buildTitle(ref),
                 const Spacer(),
+                const McpStatusIndicator(),
                 IconButton(
                   tooltip: 'Settings',
                   onPressed: () => showDialog(
