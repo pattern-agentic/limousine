@@ -8,45 +8,22 @@ final _log = logging.Logger('McpServer');
 
 enum McpServerStatus { stopped, starting, running, error }
 
-class McpLogEntry {
-  final DateTime timestamp;
-  final String direction;
-  final String method;
-  final String body;
-
-  McpLogEntry({required this.direction, required this.method, required this.body})
-      : timestamp = DateTime.now();
-}
-
 class McpServerState {
   final McpServerStatus status;
   final int port;
   final String? error;
-  final bool verboseLogging;
-  final List<McpLogEntry> logs;
 
   const McpServerState({
     this.status = McpServerStatus.stopped,
     this.port = 6891,
     this.error,
-    this.verboseLogging = false,
-    this.logs = const [],
   });
 
-  McpServerState copyWith({
-    McpServerStatus? status,
-    int? port,
-    String? error,
-    bool clearError = false,
-    bool? verboseLogging,
-    List<McpLogEntry>? logs,
-  }) {
+  McpServerState copyWith({McpServerStatus? status, int? port, String? error, bool clearError = false}) {
     return McpServerState(
       status: status ?? this.status,
       port: port ?? this.port,
       error: clearError ? null : (error ?? this.error),
-      verboseLogging: verboseLogging ?? this.verboseLogging,
-      logs: logs ?? this.logs,
     );
   }
 }
@@ -67,22 +44,6 @@ class McpServerNotifier extends Notifier<McpServerState> {
     return const McpServerState();
   }
 
-  void _addLog(String direction, String method, String body) {
-    if (!state.verboseLogging) return;
-    final entry = McpLogEntry(direction: direction, method: method, body: body);
-    final logs = [...state.logs, entry];
-    final trimmed = logs.length > 200 ? logs.sublist(logs.length - 200) : logs;
-    state = state.copyWith(logs: trimmed);
-  }
-
-  void setVerboseLogging(bool enabled) {
-    state = state.copyWith(verboseLogging: enabled);
-  }
-
-  void clearLogs() {
-    state = state.copyWith(logs: []);
-  }
-
   Future<void> start(McpConfig config) async {
     if (state.status == McpServerStatus.running) return;
 
@@ -91,9 +52,6 @@ class McpServerNotifier extends Notifier<McpServerState> {
     try {
       _server = StreamableMcpServer(
         serverFactory: (sessionId) {
-          _log.info('MCP session created: $sessionId');
-          _addLog('SYS', 'SESSION', 'Created: $sessionId');
-
           final server = McpServer(
             Implementation(name: 'limousine', version: '0.1.0'),
             options: McpServerOptions(
@@ -103,15 +61,7 @@ class McpServerNotifier extends Notifier<McpServerState> {
             ),
           );
 
-          server.onError = (e) {
-            _log.severe('MCP server error in session $sessionId', e);
-            _addLog('ERR', 'SERVER', e.toString());
-          };
-
-          registerTools(server, ref, onToolCall: (name, args) {
-            _log.info('MCP tool call: $name');
-            _addLog('REQ', 'tools/call', '$name($args)');
-          });
+          registerTools(server, ref);
 
           return server;
         },
@@ -132,7 +82,6 @@ class McpServerNotifier extends Notifier<McpServerState> {
   }
 
   Future<void> stop() async {
-    _log.info('MCP server stopping...');
     try {
       await _server?.stop();
     } catch (e) {

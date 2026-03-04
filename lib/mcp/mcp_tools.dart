@@ -4,15 +4,12 @@ import 'package:mcp_dart/mcp_dart.dart';
 import '../models/service_state.dart';
 import '../providers/workspace_provider.dart';
 import '../providers/services_provider.dart';
-import '../models/module.dart';
 
-void registerTools(McpServer server, Ref ref, {void Function(String name, Map<String, dynamic> args)? onToolCall}) {
+void registerTools(McpServer server, Ref ref) {
   server.registerTool(
     'list_services',
     description: 'List all services with their current status',
-    annotations: ToolAnnotations(readOnlyHint: true),
     callback: (args, extra) async {
-      onToolCall?.call('list_services', args);
       final services = ref.read(allServicesProvider);
       final states = ref.read(serviceStatesProvider);
 
@@ -48,7 +45,6 @@ void registerTools(McpServer server, Ref ref, {void Function(String name, Map<St
       required: ['serviceId'],
     ),
     callback: (args, extra) async {
-      onToolCall?.call('start_service', args);
       final serviceId = args['serviceId'] as String;
       final commandName = args['command'] as String?;
 
@@ -109,7 +105,6 @@ void registerTools(McpServer server, Ref ref, {void Function(String name, Map<St
       required: ['serviceId'],
     ),
     callback: (args, extra) async {
-      onToolCall?.call('stop_service', args);
       final serviceId = args['serviceId'] as String;
 
       final states = ref.read(serviceStatesProvider);
@@ -139,9 +134,7 @@ void registerTools(McpServer server, Ref ref, {void Function(String name, Map<St
       },
       required: ['serviceId'],
     ),
-    annotations: ToolAnnotations(readOnlyHint: true),
     callback: (args, extra) async {
-      onToolCall?.call('get_service_logs', args);
       final serviceId = args['serviceId'] as String;
       final requestedLines = (args['lines'] as int?) ?? 50;
       final maxLines = requestedLines.clamp(1, 500);
@@ -184,9 +177,7 @@ void registerTools(McpServer server, Ref ref, {void Function(String name, Map<St
         'projectName': JsonSchema.string(description: 'Project name. Omit to get info for all projects.'),
       },
     ),
-    annotations: ToolAnnotations(readOnlyHint: true),
     callback: (args, extra) async {
-      onToolCall?.call('get_project_info', args);
       final projectName = args['projectName'] as String?;
       final projects = await ref.read(projectsProvider.future);
 
