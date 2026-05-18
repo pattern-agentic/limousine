@@ -29,13 +29,11 @@ class McpStatusIndicator extends ConsumerWidget {
               color: isRunning ? const Color(0xFF22C55E) : Colors.grey,
             ),
           ),
-          if (isRunning) ...[
-            const SizedBox(width: 4),
-            Text(
-              ':${mcpState.port}',
-              style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.7)),
-            ),
-          ],
+          const SizedBox(width: 4),
+          Text(
+            isRunning ? 'mcp:${mcpState.port}' : 'mcp: off',
+            style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.7)),
+          ),
         ],
       ),
     );

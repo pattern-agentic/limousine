@@ -97,7 +97,7 @@ void registerTools(McpServer server, Ref ref) {
 
   server.registerTool(
     'stop_service',
-    description: 'Stop a running service by ID',
+    description: 'Stop a running service by ID. Sends escalating signals (SIGINT → SIGTERM → SIGKILL) with polling between each stage. Waits up to ~15s for the service to stop.',
     inputSchema: ToolInputSchema(
       properties: {
         'serviceId': JsonSchema.string(description: 'Service ID in format "module/service"'),
@@ -106,20 +106,39 @@ void registerTools(McpServer server, Ref ref) {
     ),
     callback: (args, extra) async {
       final serviceId = args['serviceId'] as String;
+      final notifier = ref.read(serviceStatesProvider.notifier);
 
-      final states = ref.read(serviceStatesProvider);
-      final state = states[serviceId];
-      if (state == null || state.status != ProcessStatus.running) {
+      final initialState = ref.read(serviceStatesProvider)[serviceId];
+      if (initialState == null || initialState.status != ProcessStatus.running) {
         return CallToolResult(
           content: [TextContent(text: 'Service is not running: $serviceId')],
           isError: true,
         );
       }
 
-      await ref.read(serviceStatesProvider.notifier).stopService(serviceId);
+      const signals = ['SIGINT', 'SIGTERM', 'SIGKILL'];
+      final log = StringBuffer();
 
+      for (var round = 0; round < 3; round++) {
+        await notifier.stopService(serviceId);
+        log.writeln('Sent ${signals[round]} to $serviceId');
+
+        for (var tick = 0; tick < 5; tick++) {
+          await Future.delayed(const Duration(seconds: 1));
+          final state = ref.read(serviceStatesProvider)[serviceId];
+          if (state == null || state.status != ProcessStatus.running) {
+            log.writeln('Service stopped.');
+            return CallToolResult(
+              content: [TextContent(text: log.toString().trimRight())],
+            );
+          }
+        }
+      }
+
+      log.writeln('Service did not stop after ~15s.');
       return CallToolResult(
-        content: [TextContent(text: 'Stop signal sent to $serviceId')],
+        content: [TextContent(text: log.toString().trimRight())],
+        isError: true,
       );
     },
   );
