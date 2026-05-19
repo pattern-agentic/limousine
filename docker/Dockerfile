@@ -28,6 +28,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH=/opt/limousine/lib
 
 # Base system + things several tools depend on (uv builds, ssh, jq, etc.).
+# libnss-wrapper lets the entrypoint synthesise a /etc/passwd entry for the
+# host uid we're launched as, so ssh/git stop complaining about "No user
+# exists for uid <n>" when run by macOS users (uid 501) or any Linux user
+# whose uid doesn't already exist in the base image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git openssh-client \
         bash jq gnupg lsb-release xz-utils unzip zip \
@@ -35,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         tzdata \
         libgtk-3-0 \
+        libnss-wrapper \
     && rm -rf /var/lib/apt/lists/*
 
 # Node + npm (official tarball, pinned).
@@ -105,8 +110,10 @@ RUN install -d -m 0755 /etc/ssh \
 COPY build/bin/limousine-server      /opt/limousine/limousine-server
 COPY build/bin/libflutter_pty.so     /opt/limousine/lib/libflutter_pty.so
 COPY build/web/                      /opt/limousine/web/
+COPY docker/entrypoint.sh            /usr/local/bin/limousine-entrypoint.sh
+RUN chmod +x /usr/local/bin/limousine-entrypoint.sh
 
 EXPOSE 7891 6891
 
-ENTRYPOINT ["/opt/limousine/limousine-server", "--web-root", "/opt/limousine/web"]
+ENTRYPOINT ["/usr/local/bin/limousine-entrypoint.sh"]
 CMD ["--host", "0.0.0.0", "--port", "7891"]

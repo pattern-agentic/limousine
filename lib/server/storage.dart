@@ -58,11 +58,20 @@ class Storage {
     );
   }
 
+  /// "Present" = the directory exists AND contains at least one entry other
+  /// than `.git`. An empty directory or one that has only a `.git/` left over
+  /// from a failed clone counts as *not* present — the UI shows the clone
+  /// button, `Git.clone` moves the partial directory aside before retrying.
   static Future<bool> projectExistsOnDisk(
     String workspacePath,
     String pathOnDisk,
   ) async {
-    return Directory(resolvePath(workspacePath, pathOnDisk)).exists();
+    final dir = Directory(resolvePath(workspacePath, pathOnDisk));
+    if (!await dir.exists()) return false;
+    await for (final entity in dir.list(followLinks: false)) {
+      if (p.basename(entity.path) != '.git') return true;
+    }
+    return false;
   }
 
   static String resolvePath(String workspacePath, String pathOnDisk) {

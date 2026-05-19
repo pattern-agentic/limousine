@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:logging/logging.dart';
+import 'package:path/path.dart' as p;
 
 final _log = Logger('Git');
 
@@ -37,6 +38,32 @@ class Git {
     return u;
   }
 
+  /// If [targetPath] exists but contains only a `.git/` (or is empty), move
+  /// it to `<targetPath>.failed-<ISO timestamp>` so the next clone has a clean
+  /// slate. Backup keeps anything `git fetch` may have salvaged. Real content
+  /// (non-`.git` entries) is never touched.
+  static Future<String?> _rescuePartialTarget(String targetPath) async {
+    final dir = Directory(targetPath);
+    if (!await dir.exists()) return null;
+
+    await for (final entity in dir.list(followLinks: false)) {
+      if (p.basename(entity.path) != '.git') {
+        // Real content — leave it alone. Caller decides what to do.
+        return null;
+      }
+    }
+
+    final timestamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .split('.')
+        .first;
+    final backup = '$targetPath.failed-$timestamp';
+    _log.info('Moving partial clone target $targetPath → $backup');
+    await dir.rename(backup);
+    return backup;
+  }
+
   /// Clone [repoUrl] into [targetPath]. Always normalizes to SSH for known
   /// providers (see [normalizeUrl]). Optionally uses a specific SSH key.
   static Future<GitCloneResult> clone(
@@ -44,14 +71,27 @@ class Git {
     String targetPath, {
     String? sshKeyPath,
   }) async {
+    final rescued = await _rescuePartialTarget(targetPath);
+    if (rescued != null) {
+      _log.info('Previous partial clone preserved at $rescued');
+    }
     final url = normalizeUrl(repoUrl);
 
     final args = <String>[];
     // Belt-and-suspenders: never prompt the terminal for credentials. If auth
     // fails we want a clean error in the snackbar, not a hung server.
     args.addAll(['-c', 'core.askpass=']);
+    // Force BatchMode + a short ConnectTimeout so ssh never tries to
+    // interactively prompt for a passphrase (would deadlock the server) and
+    // returns a real error if the agent isn't reachable.
+    final sshOpts = '-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new';
     if (sshKeyPath != null && sshKeyPath.isNotEmpty) {
-      args.addAll(['-c', 'core.sshCommand=ssh -i $sshKeyPath -o IdentitiesOnly=yes']);
+      args.addAll([
+        '-c',
+        'core.sshCommand=ssh -i $sshKeyPath -o IdentitiesOnly=yes $sshOpts',
+      ]);
+    } else {
+      args.addAll(['-c', 'core.sshCommand=ssh $sshOpts']);
     }
     args.addAll(['clone', url, targetPath]);
 
@@ -59,7 +99,11 @@ class Git {
     final result = await Process.run(
       'git',
       args,
-      environment: {'GIT_TERMINAL_PROMPT': '0'},
+      environment: {
+        'GIT_TERMINAL_PROMPT': '0',
+        'SSH_ASKPASS': '/bin/false',
+        'SSH_ASKPASS_REQUIRE': 'never',
+      },
       includeParentEnvironment: true,
     );
     final stdout = result.stdout.toString().trim();

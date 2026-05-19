@@ -111,10 +111,26 @@ ARGS+=(-v "${MOUNT_ROOT}:${MOUNT_ROOT}")
 [ -d "$HOME/.docker"        ] && ARGS+=(-v "$HOME/.docker:$HOME/.docker:ro")
 [ -f "$HOME/.gitconfig"     ] && ARGS+=(-v "$HOME/.gitconfig:$HOME/.gitconfig:ro")
 
-if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "${SSH_AUTH_SOCK}" ]; then
-  ARGS+=(-v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}")
-  ARGS+=(-e "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}")
-fi
+# SSH agent forwarding. The mechanism differs by host OS:
+#   Linux  → bind-mount the host's actual socket. Sockets traverse the bind.
+#   macOS  → use Docker Desktop's `/run/host-services/ssh-auth.sock` magic
+#           path. The real macOS ssh-agent socket can't be bind-mounted into
+#           the Linux VM (sockets don't cross the VM boundary), so SSH would
+#           fall back to interactive passphrase prompting and stall.
+case "$(uname -s)" in
+  Darwin)
+    if [ -n "${SSH_AUTH_SOCK:-}" ]; then
+      ARGS+=(--mount "type=bind,src=/run/host-services/ssh-auth.sock,target=/run/host-services/ssh-auth.sock")
+      ARGS+=(-e "SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock")
+    fi
+    ;;
+  *)
+    if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "${SSH_AUTH_SOCK}" ]; then
+      ARGS+=(-v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}")
+      ARGS+=(-e "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}")
+    fi
+    ;;
+esac
 
 ARGS+=(-e "HOME=$HOME")
 # Pass the password through. Empty string = no password / store locked.
