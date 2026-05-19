@@ -55,6 +55,34 @@ class Env {
     return env;
   }
 
+  /// Serialize a key-value map into env-file text. Values containing spaces,
+  /// `#`, `'`, `"`, or `=` are double-quoted. Newlines/control chars are
+  /// rejected (caller should validate before reaching here).
+  static String serialize(Map<String, String> content) {
+    final buf = StringBuffer();
+    for (final entry in content.entries) {
+      final v = entry.value;
+      if (v.contains('\n') || v.contains('\r')) {
+        throw ArgumentError('Value for ${entry.key} contains newline');
+      }
+      final needsQuoting = v.contains(' ') ||
+          v.contains('#') ||
+          v.contains('=') ||
+          v.contains("'") ||
+          v.contains('"');
+      final quoted = needsQuoting ? '"${v.replaceAll('"', '\\"')}"' : v;
+      buf.writeln('${entry.key}=$quoted');
+    }
+    return buf.toString();
+  }
+
+  /// Write `content` to `path`, creating parent directories if needed.
+  static Future<void> writeEnvFile(String path, Map<String, String> content) async {
+    final file = File(path);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(serialize(content));
+  }
+
   static Future<EnvComparisonDto> compareEnvFiles(
     String activePath,
     String sourcePath,

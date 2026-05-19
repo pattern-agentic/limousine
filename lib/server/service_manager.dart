@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../core/dto.dart';
 import '../core/module.dart';
 import 'env.dart';
+import 'secret_store.dart';
 import 'storage.dart';
 import 'workspace_manager.dart';
 
@@ -22,6 +23,7 @@ class ServiceManager {
   static const int _bufferLines = 2000;
 
   final WorkspaceManager workspaceManager;
+  final SecretStore secretStore;
   final Map<String, ServiceStateDto> _states = {};
   final Map<String, _RunningService> _running = {};
 
@@ -33,7 +35,7 @@ class ServiceManager {
   final StreamController<ServiceStateDto> _stateChanges =
       StreamController<ServiceStateDto>.broadcast();
 
-  ServiceManager(this.workspaceManager);
+  ServiceManager(this.workspaceManager, this.secretStore);
 
   Stream<ServiceStateDto> get stateChanges => _stateChanges.stream;
 
@@ -87,7 +89,16 @@ class ServiceManager {
 
     final envPath = p.join(info.projectPath, info.moduleConfig.activeEnvFile);
     final secretsPath = p.join(info.projectPath, info.moduleConfig.activeSecretsEnvFile);
-    final env = await Env.buildProcessEnv(envPath, secretsPath);
+    final env = await Env.buildProcessEnv(envPath, null);
+    // Encrypted secrets — refuse to start if the store can't decrypt them.
+    try {
+      final secrets = await secretStore.loadSecrets(secretsPath);
+      env.addAll(secrets);
+    } on SecretStoreLockedException catch (e) {
+      throw StateError('Cannot start $serviceId: ${e.message}');
+    } on Exception catch (e) {
+      throw StateError('Cannot start $serviceId: failed to load secrets ($e)');
+    }
 
     final pty = Pty.start(
       shell,

@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # limousine — launch the limousine server container, mounting your workspace,
-# docker socket, and the usual auth/config dirs so cloud CLIs Just Work.
+# docker socket, and the usual auth/config dirs.
 #
 # Usage:
 #   limousine /abs/path/to/foo.wksp           # serve, auto-open this workspace
 #   limousine                                 # serve, pick a workspace in the UI
+#   limousine --lan /abs/path/foo.wksp        # bind to 0.0.0.0 (see warning)
 #
 # Env overrides:
-#   LIMOUSINE_IMAGE       (default ghcr.io/pattern-agentic/limousine:latest)
-#   LIMOUSINE_PORT        (default 7891)  — main HTTP port
-#   LIMOUSINE_MCP_PORT    (default 6891)  — MCP server port
-#   LIMOUSINE_MOUNT_ROOT  override the host directory bind-mounted into the
-#                          container (default: parent of the workspace file,
-#                          or $PWD if no workspace is given). All limousine.proj
-#                          project paths must resolve inside this dir.
+#   LIMOUSINE_IMAGE                default ghcr.io/pattern-agentic/limousine:latest
+#   LIMOUSINE_PORT                 default 7891   — main HTTP port
+#   LIMOUSINE_MCP_PORT             default 6891   — MCP server port
+#   LIMOUSINE_MOUNT_ROOT           override the host directory bind-mounted
+#                                  into the container.
+#   LIMOUSINE_SECRETS_PASSWORD     if set, bypasses the interactive prompt.
+#   LIMOUSINE_NO_PASSWORD_PROMPT   set to 1 to start with an empty password
+#                                  (secret store stays locked, services with
+#                                  encrypted secrets refuse to start).
 
 set -euo pipefail
 
@@ -21,14 +24,25 @@ IMAGE="${LIMOUSINE_IMAGE:-ghcr.io/pattern-agentic/limousine:latest}"
 PORT="${LIMOUSINE_PORT:-7891}"
 MCP_PORT="${LIMOUSINE_MCP_PORT:-6891}"
 
-WORKSPACE="${1:-}"
+LAN=0
+WORKSPACE=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --lan) LAN=1; shift ;;
+    -h|--help)
+      sed -n '2,17p' "$0" | sed 's/^# *//'
+      exit 0 ;;
+    --) shift; WORKSPACE="${1:-}"; shift || true ;;
+    -*) echo "error: unknown flag $1" >&2; exit 2 ;;
+    *) WORKSPACE="$1"; shift ;;
+  esac
+done
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "error: docker is required" >&2
   exit 1
 fi
 
-# Resolve workspace to absolute path (handles ~ and relative).
 abs_path() {
   if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
     readlink -f "$1"
@@ -49,49 +63,72 @@ fi
 MOUNT_ROOT="${LIMOUSINE_MOUNT_ROOT:-$DEFAULT_MOUNT}"
 MOUNT_ROOT="$(abs_path "$MOUNT_ROOT")"
 
-# Container args
+# -- Secret-store password prompt --------------------------------------------------
+# Read once, interactively, with no echo. Empty input → secret store stays locked
+# at startup; services with encrypted secrets will refuse to start until
+# you restart with the right password.
+if [ -z "${LIMOUSINE_SECRETS_PASSWORD:-}" ] && [ "${LIMOUSINE_NO_PASSWORD_PROMPT:-0}" != "1" ]; then
+  if [ -t 0 ]; then
+    printf 'Secret-store password (enter to skip, store stays locked): ' >&2
+    IFS= read -rs LIMOUSINE_SECRETS_PASSWORD || true
+    echo >&2
+    export LIMOUSINE_SECRETS_PASSWORD
+  else
+    echo "stdin not a tty — set LIMOUSINE_SECRETS_PASSWORD or LIMOUSINE_NO_PASSWORD_PROMPT=1" >&2
+    exit 2
+  fi
+fi
+
+# -- Bind host --------------------------------------------------------------
+BIND_HOST="127.0.0.1"
+if [ "$LAN" = "1" ]; then
+  BIND_HOST="0.0.0.0"
+  echo "⚠  --lan: binding to 0.0.0.0. Secret values are still gated by your"  >&2
+  echo "    secret-store password header, but anyone on the LAN who knows the"      >&2
+  echo "    password can read them. Service terminals are NOT gated."         >&2
+fi
+
+# -- docker run args --------------------------------------------------------
 ARGS=(--rm)
 [ -t 0 ] && ARGS+=(-it) || ARGS+=(-i)
 
 ARGS+=(--name "limousine-${PORT}")
-ARGS+=(-p "${PORT}:${PORT}" -p "${MCP_PORT}:${MCP_PORT}")
+# Bind both the main port and the MCP port to BIND_HOST explicitly.
+ARGS+=(-p "${BIND_HOST}:${PORT}:${PORT}" -p "${BIND_HOST}:${MCP_PORT}:${MCP_PORT}")
 
-# Match host uid/gid so files the container writes are owned by you.
 ARGS+=(--user "$(id -u):$(id -g)")
 
-# Linux: add the docker group's gid so the in-container user can write to the
-# bind-mounted /var/run/docker.sock. Skipped on macOS — Docker Desktop maps it.
 if [ "$(uname -s)" = "Linux" ] && [ -S /var/run/docker.sock ]; then
   ARGS+=(--group-add "$(stat -c %g /var/run/docker.sock)")
 fi
 
-# Bind mounts: docker socket, workspace tree, cloud/auth config.
 ARGS+=(-v /var/run/docker.sock:/var/run/docker.sock)
 ARGS+=(-v "${MOUNT_ROOT}:${MOUNT_ROOT}")
-[ -d "$HOME/.aws"             ] && ARGS+=(-v "$HOME/.aws:$HOME/.aws")
-[ -d "$HOME/.kube"            ] && ARGS+=(-v "$HOME/.kube:$HOME/.kube")
-[ -d "$HOME/.config/gcloud"   ] && ARGS+=(-v "$HOME/.config/gcloud:$HOME/.config/gcloud")
-[ -d "$HOME/.ssh"             ] && ARGS+=(-v "$HOME/.ssh:$HOME/.ssh:ro")
-[ -d "$HOME/.docker"          ] && ARGS+=(-v "$HOME/.docker:$HOME/.docker:ro")
-[ -f "$HOME/.gitconfig"       ] && ARGS+=(-v "$HOME/.gitconfig:$HOME/.gitconfig:ro")
+[ -d "$HOME/.aws"           ] && ARGS+=(-v "$HOME/.aws:$HOME/.aws")
+[ -d "$HOME/.kube"          ] && ARGS+=(-v "$HOME/.kube:$HOME/.kube")
+[ -d "$HOME/.config/gcloud" ] && ARGS+=(-v "$HOME/.config/gcloud:$HOME/.config/gcloud")
+[ -d "$HOME/.ssh"           ] && ARGS+=(-v "$HOME/.ssh:$HOME/.ssh:ro")
+[ -d "$HOME/.docker"        ] && ARGS+=(-v "$HOME/.docker:$HOME/.docker:ro")
+[ -f "$HOME/.gitconfig"     ] && ARGS+=(-v "$HOME/.gitconfig:$HOME/.gitconfig:ro")
 
-# SSH agent forwarding for git+ssh clones.
 if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "${SSH_AUTH_SOCK}" ]; then
   ARGS+=(-v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}")
   ARGS+=(-e "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}")
 fi
 
-# Keep $HOME the same inside, so ~/.aws etc. resolve to the bind-mounted dirs.
 ARGS+=(-e "HOME=$HOME")
+# Pass the password through. Empty string = no password / store locked.
+ARGS+=(-e "LIMOUSINE_SECRETS_PASSWORD=${LIMOUSINE_SECRETS_PASSWORD:-}")
 
-# Server CLI args
-SERVER_ARGS=(--host 0.0.0.0 --port "$PORT")
+# -- Server CLI args --------------------------------------------------------
+SERVER_ARGS=(--host 0.0.0.0 --port "$PORT")   # inside-container always 0.0.0.0; host-side binding is enforced via -p
 [ -n "$WORKSPACE_ABS" ] && SERVER_ARGS+=(--workspace "$WORKSPACE_ABS")
 
 echo "▶ ${IMAGE}"
-echo "  http://localhost:${PORT}    (UI)"
-echo "  http://localhost:${MCP_PORT}/mcp (MCP, if enabled)"
+echo "  http://${BIND_HOST}:${PORT}    (UI)"
+echo "  http://${BIND_HOST}:${MCP_PORT}/mcp (MCP, if enabled)"
 echo "  mounting ${MOUNT_ROOT}"
 [ -n "$WORKSPACE_ABS" ] && echo "  workspace ${WORKSPACE_ABS}"
+[ -z "${LIMOUSINE_SECRETS_PASSWORD:-}" ] && echo "  secret store: locked (no password supplied)"
 
 exec docker run "${ARGS[@]}" "$IMAGE" "${SERVER_ARGS[@]}"

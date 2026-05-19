@@ -78,6 +78,35 @@ class LoadedProjectDto {
   }
 }
 
+/// Keys-only view of a secrets file. Returned by /secrets/keys without a
+/// password header: just the key names, not the values. Used by the secrets
+/// editor to render its skeleton before the user supplies the secret-store password.
+class SecretsKeysDto {
+  final bool activeExists;
+  final bool sourceExists;
+  final List<String> activeKeys;
+  final Map<String, String> sourceContent; // template, not secret
+  final String? readError;
+
+  SecretsKeysDto({
+    required this.activeExists,
+    required this.sourceExists,
+    required this.activeKeys,
+    required this.sourceContent,
+    this.readError,
+  });
+
+  factory SecretsKeysDto.fromJson(Map<String, dynamic> json) {
+    return SecretsKeysDto(
+      activeExists: json['activeExists'] as bool,
+      sourceExists: json['sourceExists'] as bool,
+      activeKeys: (json['activeKeys'] as List).cast<String>(),
+      sourceContent: Map<String, String>.from(json['sourceContent'] as Map),
+      readError: json['readError'] as String?,
+    );
+  }
+}
+
 class EnvComparisonDto {
   final bool activeExists;
   final bool sourceExists;

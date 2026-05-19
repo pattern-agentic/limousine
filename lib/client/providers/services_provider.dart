@@ -6,6 +6,7 @@ import '../../core/dto.dart';
 import '../api_client.dart';
 import 'api_provider.dart';
 import 'mcp_provider.dart';
+import 'secret_store_provider.dart';
 
 final serviceStatesProvider =
     NotifierProvider<ServiceStatesNotifier, Map<String, ServiceStateDto>>(
@@ -51,6 +52,12 @@ class ServiceStatesNotifier extends Notifier<Map<String, ServiceStateDto>> {
             if (mcp != null) {
               ref.read(mcpProvider.notifier).applyFromSocket(mcp);
             }
+            final store = msg['secret-store'] as Map<String, dynamic>?;
+            if (store != null) {
+              ref
+                  .read(secretStoreProvider.notifier)
+                  .applyFromSocket(store);
+            }
             break;
           case 'state':
             final dto = ServiceStateDto.fromJson(
@@ -61,6 +68,11 @@ class ServiceStatesNotifier extends Notifier<Map<String, ServiceStateDto>> {
             ref
                 .read(mcpProvider.notifier)
                 .applyFromSocket(msg['mcp'] as Map<String, dynamic>);
+            break;
+          case 'secret-store':
+            ref
+                .read(secretStoreProvider.notifier)
+                .applyFromSocket(msg['secret-store'] as Map<String, dynamic>);
             break;
         }
       },

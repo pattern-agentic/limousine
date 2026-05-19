@@ -158,11 +158,47 @@ class ApiClient {
   Future<EnvComparisonDto> getEnv(String serviceId) async =>
       EnvComparisonDto.fromJson(await _get('/api/services/$serviceId/env'));
 
+  Future<void> setEnv(String serviceId, Map<String, String> content) =>
+      _put('/api/services/$serviceId/env', {'content': content});
+
   Future<void> cloneProject(String projectName) =>
       _post('/api/projects/$projectName/clone');
 
-  Future<EnvComparisonDto> getSecrets(String serviceId) async =>
-      EnvComparisonDto.fromJson(await _get('/api/services/$serviceId/secrets'));
+  Future<SecretsKeysDto> getSecretsKeys(String serviceId) async {
+    final json = await _get('/api/services/$serviceId/secrets/keys');
+    return SecretsKeysDto.fromJson(json);
+  }
+
+  Future<EnvComparisonDto> getSecretsValues(String serviceId, String password) async {
+    final r = await _http.get(
+      _u('/api/services/$serviceId/secrets'),
+      headers: {'authorization': 'Bearer $password'},
+    );
+    if (r.statusCode == 401) {
+      throw ApiException(401, 'Bad secret-store password');
+    }
+    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.body);
+    return EnvComparisonDto.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  Future<void> setSecrets(
+    String serviceId,
+    String password,
+    Map<String, String> content,
+  ) async {
+    final r = await _http.put(
+      _u('/api/services/$serviceId/secrets'),
+      headers: {
+        'content-type': 'application/json',
+        'authorization': 'Bearer $password',
+      },
+      body: jsonEncode({'content': content}),
+    );
+    if (r.statusCode == 401) {
+      throw ApiException(401, 'Bad secret-store password');
+    }
+    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.body);
+  }
 
   Uri _wsUri(String path) {
     final scheme = baseUri.scheme == 'https' ? 'wss' : 'ws';

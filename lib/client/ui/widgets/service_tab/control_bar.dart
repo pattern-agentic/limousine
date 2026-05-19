@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/dto.dart';
 import '../../../providers/services_provider.dart';
 import '../../../providers/workspace_provider.dart';
-import '../dialogs/env_dialog.dart';
-import '../dialogs/secrets_dialog.dart';
+import '../dialogs/env_editor.dart';
+import '../dialogs/secrets_editor.dart';
 
 class ControlBar extends ConsumerStatefulWidget {
   final ClientServiceInfo service;
@@ -183,14 +183,11 @@ class _ControlBarState extends ConsumerState<ControlBar> {
       ],
       onSelected: (v) {
         if (v == 'env') {
-          showDialog(
-            context: context,
-            builder: (_) => EnvDialog(serviceId: widget.service.id),
-          );
+          EnvEditorOpener.openEnv(context, ref, widget.service.id);
         } else if (v == 'secrets') {
           showDialog(
             context: context,
-            builder: (_) => SecretsDialog(serviceId: widget.service.id),
+            builder: (_) => SecretsEditorDialog(serviceId: widget.service.id),
           );
         }
       },

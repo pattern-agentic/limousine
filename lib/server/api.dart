@@ -7,11 +7,12 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import '../core/dto.dart';
 import '../core/workspace.dart';
+import '../core/dto.dart';
 import 'env.dart';
 import 'git.dart';
 import 'mcp.dart';
+import 'secret_store.dart';
 import 'service_manager.dart';
 import 'storage.dart';
 import 'workspace_manager.dart';
@@ -27,7 +28,37 @@ Response _json(Object? body, {int status = 200}) => Response(
 Response _error(String message, {int status = 400}) =>
     _json({'error': message}, status: status);
 
-Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm, McpManager mcp) {
+/// Pulls the bearer password from `Authorization: Bearer <pw>` and validates
+/// it against the secret store's password. Returns the password if valid, or
+/// a 401 response. Caller short-circuits on the response.
+({String? password, Response? failure}) _requireSecretStoreHeader(
+  Request req,
+  SecretStore store,
+) {
+  final auth = req.headers['authorization'];
+  if (auth == null || !auth.toLowerCase().startsWith('bearer ')) {
+    return (
+      password: null,
+      failure: _error('Missing Authorization: Bearer <password> header',
+          status: 401),
+    );
+  }
+  final candidate = auth.substring(7);
+  if (!store.verifyHeaderPassword(candidate)) {
+    return (
+      password: null,
+      failure: _error('Bad secret-store password', status: 401),
+    );
+  }
+  return (password: candidate, failure: null);
+}
+
+Router buildApiRouter(
+  WorkspaceManager wsm,
+  ServiceManager sm,
+  McpManager mcp,
+  SecretStore secretStore,
+) {
   final router = Router();
 
   router.get('/api/health', (Request _) => _json({'ok': true}));
@@ -179,19 +210,117 @@ Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm, McpManager mcp) {
     return _json((await Env.compareEnvFiles(activePath, sourcePath)).toJson());
   });
 
-  router.get('/api/services/<id|.*>/secrets', (Request req, String id) async {
+  router.put('/api/services/<id|.*>/env', (Request req, String id) async {
+    final info = wsm.findService(id);
+    if (info == null) return _error('Service not found', status: 404);
+    final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
+    final content = (body['content'] as Map<String, dynamic>?)
+            ?.map((k, v) => MapEntry(k, v.toString())) ??
+        const <String, String>{};
+    final activePath = p.join(info.projectPath, info.moduleConfig.activeEnvFile);
+    try {
+      await Env.writeEnvFile(activePath, content);
+    } catch (e) {
+      return _error(e.toString(), status: 400);
+    }
+    return _json({'ok': true});
+  });
+
+  // Secret-store status — no auth, returns enough for the UI to render the
+  // indicator and decide whether to prompt for a password before opening the
+  // editor.
+  router.get('/api/secret-store/status', (Request _) {
+    return _json({'status': secretStore.status.name});
+  });
+
+  // Keys-only view of an active secrets file. Uses the server's stored
+  // password (already proven correct via the stamp). Safe to expose without
+  // a password header: key names aren't typically the sensitive part.
+  router.get('/api/services/<id|.*>/secrets/keys', (Request _, String id) async {
     final info = wsm.findService(id);
     if (info == null) return _error('Service not found', status: 404);
     final activePath = p.join(info.projectPath, info.moduleConfig.activeSecretsEnvFile);
     final sourcePath = p.join(info.projectPath, info.moduleConfig.sourceSecretsFile);
-    final cmp = await Env.compareEnvFiles(activePath, sourcePath);
-    final hide = (Map<String, String> m) => m.map((k, _) => MapEntry(k, ''));
+    final sourceExists = await File(sourcePath).exists();
+    final activeExists = await File(activePath).exists();
+
+    Map<String, String> sourceContent = const {};
+    if (sourceExists) {
+      sourceContent = await Env.loadEnvFile(sourcePath); // template, not a secret
+    }
+
+    List<String> activeKeys = const [];
+    String? readError;
+    if (activeExists) {
+      try {
+        final m = await secretStore.loadSecrets(activePath);
+        activeKeys = m.keys.toList();
+      } on SecretStoreLockedException catch (e) {
+        readError = e.message;
+      } catch (e) {
+        readError = 'Failed to decrypt: $e';
+      }
+    }
+
+    return _json({
+      'activeExists': activeExists,
+      'sourceExists': sourceExists,
+      'activeKeys': activeKeys,
+      'sourceContent': sourceContent,
+      if (readError != null) 'readError': readError,
+    });
+  });
+
+  // Full values for the active secrets file — password header required.
+  router.get('/api/services/<id|.*>/secrets', (Request req, String id) async {
+    final auth = _requireSecretStoreHeader(req, secretStore);
+    if (auth.failure != null) return auth.failure!;
+    final info = wsm.findService(id);
+    if (info == null) return _error('Service not found', status: 404);
+    final activePath = p.join(info.projectPath, info.moduleConfig.activeSecretsEnvFile);
+    final sourcePath = p.join(info.projectPath, info.moduleConfig.sourceSecretsFile);
+
+    Map<String, String> activeContent = const {};
+    bool activeExists = await File(activePath).exists();
+    if (activeExists) {
+      try {
+        activeContent = await secretStore.loadSecrets(activePath);
+      } on SecretStoreLockedException catch (e) {
+        return _error(e.message, status: 423);
+      } catch (e) {
+        return _error('Failed to decrypt: $e', status: 500);
+      }
+    }
+    final sourceContent =
+        await File(sourcePath).exists() ? await Env.loadEnvFile(sourcePath) : <String, String>{};
+
     return _json(EnvComparisonDto(
-      activeExists: cmp.activeExists,
-      sourceExists: cmp.sourceExists,
-      activeContent: hide(cmp.activeContent),
-      sourceContent: hide(cmp.sourceContent),
+      activeExists: activeExists,
+      sourceExists: await File(sourcePath).exists(),
+      activeContent: activeContent,
+      sourceContent: sourceContent,
     ).toJson());
+  });
+
+  // Write a new (always-encrypted) secrets file — password header required.
+  router.put('/api/services/<id|.*>/secrets', (Request req, String id) async {
+    final auth = _requireSecretStoreHeader(req, secretStore);
+    if (auth.failure != null) return auth.failure!;
+    final info = wsm.findService(id);
+    if (info == null) return _error('Service not found', status: 404);
+    final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
+    final content = (body['content'] as Map<String, dynamic>?)
+            ?.map((k, v) => MapEntry(k, v.toString())) ??
+        const <String, String>{};
+    final activePath = p.join(info.projectPath, info.moduleConfig.activeSecretsEnvFile);
+    try {
+      await secretStore.saveSecrets(activePath, content);
+    } on SecretStoreLockedException catch (e) {
+      return _error(e.message, status: 423);
+    } catch (e) {
+      return _error(e.toString(), status: 400);
+    }
+    return _json({'ok': true});
   });
 
   router.get('/api/services/<id|.*>/buffer', (Request _, String id) {
@@ -243,7 +372,7 @@ Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm, McpManager mcp) {
 
   router.get('/ws/state', (Request req) {
     final handler = webSocketHandler((WebSocketChannel ws, _) {
-      _handleStateSocket(ws, sm, wsm, mcp);
+      _handleStateSocket(ws, sm, wsm, mcp, secretStore);
     });
     return handler(req);
   });
@@ -298,11 +427,13 @@ void _handleStateSocket(
   ServiceManager sm,
   WorkspaceManager wsm,
   McpManager mcp,
+  SecretStore secretStore,
 ) {
   ws.sink.add(jsonEncode({
     'type': 'snapshot',
     'states': sm.states.map((k, v) => MapEntry(k, v.toJson())),
     'mcp': mcp.state.toJson(),
+    'secret-store': {'status': secretStore.status.name},
   }));
 
   final stateSub = sm.stateChanges.listen(
@@ -314,6 +445,12 @@ void _handleStateSocket(
   final mcpSub = mcp.changes.listen(
     (s) => ws.sink.add(jsonEncode({'type': 'mcp', 'mcp': s.toJson()})),
   );
+  final storeSub = secretStore.changes.listen(
+    (s) => ws.sink.add(jsonEncode({
+      'type': 'secret-store',
+      'secret-store': {'status': s.name},
+    })),
+  );
 
   ws.stream.listen(
     (_) {},
@@ -321,6 +458,7 @@ void _handleStateSocket(
       stateSub.cancel();
       wsSub.cancel();
       mcpSub.cancel();
+      storeSub.cancel();
     },
   );
 }
