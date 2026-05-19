@@ -1,0 +1,20 @@
+.git
+.dart_tool
+.flutter-plugins-dependencies
+.venv/
+limousine/
+limousine-vscode/
+test-mcp-dart-1/
+test-project/
+docs/
+*.log
+*~
+.env
+
+# Exclude everything in build/ except the pre-built artifacts we copy into the image.
+build/*
+!build/bin
+!build/web
+build/bin/*
+!build/bin/limousine-server
+!build/bin/libflutter_pty.so

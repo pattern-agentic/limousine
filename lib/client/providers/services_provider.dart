@@ -5,6 +5,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../core/dto.dart';
 import '../api_client.dart';
 import 'api_provider.dart';
+import 'mcp_provider.dart';
 
 final serviceStatesProvider =
     NotifierProvider<ServiceStatesNotifier, Map<String, ServiceStateDto>>(
@@ -46,11 +47,20 @@ class ServiceStatesNotifier extends Notifier<Map<String, ServiceStateDto>> {
                 entry.key: ServiceStateDto.fromJson(
                     entry.value as Map<String, dynamic>),
             };
+            final mcp = msg['mcp'] as Map<String, dynamic>?;
+            if (mcp != null) {
+              ref.read(mcpProvider.notifier).applyFromSocket(mcp);
+            }
             break;
           case 'state':
             final dto = ServiceStateDto.fromJson(
                 msg['state'] as Map<String, dynamic>);
             state = {...state, dto.serviceId: dto};
+            break;
+          case 'mcp':
+            ref
+                .read(mcpProvider.notifier)
+                .applyFromSocket(msg['mcp'] as Map<String, dynamic>);
             break;
         }
       },

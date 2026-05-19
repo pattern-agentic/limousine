@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# limousine — launch the limousine server container, mounting your workspace,
+# docker socket, and the usual auth/config dirs so cloud CLIs Just Work.
+#
+# Usage:
+#   limousine /abs/path/to/foo.wksp           # serve, auto-open this workspace
+#   limousine                                 # serve, pick a workspace in the UI
+#
+# Env overrides:
+#   LIMOUSINE_IMAGE       (default ghcr.io/pattern-agentic/limousine:latest)
+#   LIMOUSINE_PORT        (default 7891)  — main HTTP port
+#   LIMOUSINE_MCP_PORT    (default 6891)  — MCP server port
+#   LIMOUSINE_MOUNT_ROOT  override the host directory bind-mounted into the
+#                          container (default: parent of the workspace file,
+#                          or $PWD if no workspace is given). All limousine.proj
+#                          project paths must resolve inside this dir.
+
+set -euo pipefail
+
+IMAGE="${LIMOUSINE_IMAGE:-ghcr.io/pattern-agentic/limousine:latest}"
+PORT="${LIMOUSINE_PORT:-7891}"
+MCP_PORT="${LIMOUSINE_MCP_PORT:-6891}"
+
+WORKSPACE="${1:-}"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "error: docker is required" >&2
+  exit 1
+fi
+
+# Resolve workspace to absolute path (handles ~ and relative).
+abs_path() {
+  if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
+    readlink -f "$1"
+  else
+    # macOS: readlink -f isn't available
+    python3 -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$1"
+  fi
+}
+
+if [ -n "$WORKSPACE" ]; then
+  WORKSPACE_ABS="$(abs_path "$WORKSPACE")"
+  DEFAULT_MOUNT="$(dirname "$WORKSPACE_ABS")"
+else
+  WORKSPACE_ABS=""
+  DEFAULT_MOUNT="$(pwd)"
+fi
+
+MOUNT_ROOT="${LIMOUSINE_MOUNT_ROOT:-$DEFAULT_MOUNT}"
+MOUNT_ROOT="$(abs_path "$MOUNT_ROOT")"
+
+# Container args
+ARGS=(--rm)
+[ -t 0 ] && ARGS+=(-it) || ARGS+=(-i)
+
+ARGS+=(--name "limousine-${PORT}")
+ARGS+=(-p "${PORT}:${PORT}" -p "${MCP_PORT}:${MCP_PORT}")
+
+# Match host uid/gid so files the container writes are owned by you.
+ARGS+=(--user "$(id -u):$(id -g)")
+
+# Linux: add the docker group's gid so the in-container user can write to the
+# bind-mounted /var/run/docker.sock. Skipped on macOS — Docker Desktop maps it.
+if [ "$(uname -s)" = "Linux" ] && [ -S /var/run/docker.sock ]; then
+  ARGS+=(--group-add "$(stat -c %g /var/run/docker.sock)")
+fi
+
+# Bind mounts: docker socket, workspace tree, cloud/auth config.
+ARGS+=(-v /var/run/docker.sock:/var/run/docker.sock)
+ARGS+=(-v "${MOUNT_ROOT}:${MOUNT_ROOT}")
+[ -d "$HOME/.aws"             ] && ARGS+=(-v "$HOME/.aws:$HOME/.aws")
+[ -d "$HOME/.kube"            ] && ARGS+=(-v "$HOME/.kube:$HOME/.kube")
+[ -d "$HOME/.config/gcloud"   ] && ARGS+=(-v "$HOME/.config/gcloud:$HOME/.config/gcloud")
+[ -d "$HOME/.ssh"             ] && ARGS+=(-v "$HOME/.ssh:$HOME/.ssh:ro")
+[ -d "$HOME/.docker"          ] && ARGS+=(-v "$HOME/.docker:$HOME/.docker:ro")
+[ -f "$HOME/.gitconfig"       ] && ARGS+=(-v "$HOME/.gitconfig:$HOME/.gitconfig:ro")
+
+# SSH agent forwarding for git+ssh clones.
+if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "${SSH_AUTH_SOCK}" ]; then
+  ARGS+=(-v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}")
+  ARGS+=(-e "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}")
+fi
+
+# Keep $HOME the same inside, so ~/.aws etc. resolve to the bind-mounted dirs.
+ARGS+=(-e "HOME=$HOME")
+
+# Server CLI args
+SERVER_ARGS=(--host 0.0.0.0 --port "$PORT")
+[ -n "$WORKSPACE_ABS" ] && SERVER_ARGS+=(--workspace "$WORKSPACE_ABS")
+
+echo "▶ ${IMAGE}"
+echo "  http://localhost:${PORT}    (UI)"
+echo "  http://localhost:${MCP_PORT}/mcp (MCP, if enabled)"
+echo "  mounting ${MOUNT_ROOT}"
+[ -n "$WORKSPACE_ABS" ] && echo "  workspace ${WORKSPACE_ABS}"
+
+exec docker run "${ARGS[@]}" "$IMAGE" "${SERVER_ARGS[@]}"

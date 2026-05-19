@@ -158,6 +158,9 @@ class ApiClient {
   Future<EnvComparisonDto> getEnv(String serviceId) async =>
       EnvComparisonDto.fromJson(await _get('/api/services/$serviceId/env'));
 
+  Future<void> cloneProject(String projectName) =>
+      _post('/api/projects/$projectName/clone');
+
   Future<EnvComparisonDto> getSecrets(String serviceId) async =>
       EnvComparisonDto.fromJson(await _get('/api/services/$serviceId/secrets'));
 

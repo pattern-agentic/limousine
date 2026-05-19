@@ -10,6 +10,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../core/dto.dart';
 import '../core/workspace.dart';
 import 'env.dart';
+import 'git.dart';
+import 'mcp.dart';
 import 'service_manager.dart';
 import 'storage.dart';
 import 'workspace_manager.dart';
@@ -25,7 +27,7 @@ Response _json(Object? body, {int status = 200}) => Response(
 Response _error(String message, {int status = 400}) =>
     _json({'error': message}, status: status);
 
-Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm) {
+Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm, McpManager mcp) {
   final router = Router();
 
   router.get('/api/health', (Request _) => _json({'ok': true}));
@@ -104,6 +106,35 @@ Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm) {
     return _json({'ok': true});
   });
 
+  router.post('/api/projects/<name>/clone', (Request _, String name) async {
+    final ws = wsm.workspace;
+    if (ws == null) return _error('No workspace open', status: 409);
+    final ref = ws.projects[name];
+    if (ref == null) return _error('Project not found: $name', status: 404);
+    if (ref.gitRepoUrl == null) {
+      return _error('Project has no git URL', status: 400);
+    }
+    final loaded = wsm.projects[name];
+    if (loaded != null && loaded.existsOnDisk) {
+      return _error('Project already exists on disk', status: 409);
+    }
+    final targetPath = loaded?.resolvedPath ??
+        Storage.resolvePath(wsm.workspacePath!, ref.pathOnDisk);
+    final result = await Git.clone(
+      ref.gitRepoUrl!,
+      targetPath,
+      sshKeyPath: ws.gitSshKeyPath,
+    );
+    if (!result.success) {
+      return _error(
+        'git clone failed (exit ${result.exitCode}):\n${result.stderr}',
+        status: 500,
+      );
+    }
+    await wsm.reloadProjects();
+    return _json({'ok': true, 'stdout': result.stdout, 'stderr': result.stderr});
+  });
+
   router.get('/api/services', (Request _) {
     final services = wsm.allServices().map((s) => s.toJson()).toList();
     return _json(services);
@@ -168,6 +199,41 @@ Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm) {
     return _json({'chunks': buffer});
   });
 
+  router.get('/api/mcp', (Request _) {
+    return _json({
+      'state': mcp.state.toJson(),
+      'config': wsm.workspace?.mcpConfig?.toJson(),
+    });
+  });
+
+  router.post('/api/mcp/start', (Request req) async {
+    final ws = wsm.workspace;
+    if (ws == null) return _error('No workspace open', status: 409);
+    final raw = await req.readAsString();
+    final body = raw.isEmpty
+        ? <String, dynamic>{}
+        : (jsonDecode(raw) as Map<String, dynamic>? ?? {});
+    final config = McpConfig(
+      enabled: true,
+      port: (body['port'] as int?) ?? ws.mcpConfig?.port ?? 6891,
+      token: (body['token'] as String?) ?? ws.mcpConfig?.token,
+    );
+    await wsm.saveWorkspace(ws.copyWith(mcpConfig: config));
+    await mcp.start(config);
+    return _json(mcp.state.toJson());
+  });
+
+  router.post('/api/mcp/stop', (Request _) async {
+    await mcp.stop();
+    final ws = wsm.workspace;
+    if (ws != null && ws.mcpConfig != null) {
+      await wsm.saveWorkspace(
+        ws.copyWith(mcpConfig: ws.mcpConfig!.copyWith(enabled: false)),
+      );
+    }
+    return _json(mcp.state.toJson());
+  });
+
   router.get('/ws/services/<id|.*>', (Request req, String id) {
     final handler = webSocketHandler((WebSocketChannel ws, _) {
       _handleServiceSocket(ws, id, sm);
@@ -177,7 +243,7 @@ Router buildApiRouter(WorkspaceManager wsm, ServiceManager sm) {
 
   router.get('/ws/state', (Request req) {
     final handler = webSocketHandler((WebSocketChannel ws, _) {
-      _handleStateSocket(ws, sm, wsm);
+      _handleStateSocket(ws, sm, wsm, mcp);
     });
     return handler(req);
   });
@@ -227,10 +293,16 @@ void _handleServiceSocket(WebSocketChannel ws, String serviceId, ServiceManager 
   );
 }
 
-void _handleStateSocket(WebSocketChannel ws, ServiceManager sm, WorkspaceManager wsm) {
+void _handleStateSocket(
+  WebSocketChannel ws,
+  ServiceManager sm,
+  WorkspaceManager wsm,
+  McpManager mcp,
+) {
   ws.sink.add(jsonEncode({
     'type': 'snapshot',
     'states': sm.states.map((k, v) => MapEntry(k, v.toJson())),
+    'mcp': mcp.state.toJson(),
   }));
 
   final stateSub = sm.stateChanges.listen(
@@ -239,12 +311,16 @@ void _handleStateSocket(WebSocketChannel ws, ServiceManager sm, WorkspaceManager
   final wsSub = wsm.changes.listen(
     (_) => ws.sink.add(jsonEncode({'type': 'workspace-changed'})),
   );
+  final mcpSub = mcp.changes.listen(
+    (s) => ws.sink.add(jsonEncode({'type': 'mcp', 'mcp': s.toJson()})),
+  );
 
   ws.stream.listen(
     (_) {},
     onDone: () {
       stateSub.cancel();
       wsSub.cancel();
+      mcpSub.cancel();
     },
   );
 }

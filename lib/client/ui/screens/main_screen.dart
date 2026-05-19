@@ -4,6 +4,8 @@ import '../../../core/dto.dart';
 import '../../providers/services_provider.dart';
 import '../../providers/workspace_provider.dart';
 import '../widgets/dashboard/dashboard_tab.dart';
+import '../widgets/dialogs/settings_dialog.dart';
+import '../widgets/mcp_status_indicator.dart';
 import '../widgets/service_tab/service_tab.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
@@ -85,6 +87,15 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                 const SizedBox(width: 8),
                 _Title(),
                 const Spacer(),
+                const McpStatusIndicator(),
+                IconButton(
+                  tooltip: 'Settings',
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (_) => const SettingsDialog(),
+                  ),
+                  icon: const Icon(Icons.settings_outlined),
+                ),
                 IconButton(
                   tooltip: 'Close workspace',
                   onPressed: _confirmClose,
