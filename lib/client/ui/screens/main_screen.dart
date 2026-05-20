@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/dto.dart';
+import '../../api_client.dart';
+import '../../providers/api_provider.dart';
 import '../../providers/services_provider.dart';
 import '../../providers/workspace_provider.dart';
 import '../widgets/dashboard/dashboard_tab.dart';
@@ -23,7 +26,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   Widget build(BuildContext context) {
     final services = ref.watch(allServicesProvider);
     final serviceStates = ref.watch(serviceStatesProvider);
-    final collapsedModules = ref.watch(collapsedModulesProvider);
+    final hideInactive = ref.watch(hideInactiveProvider);
+    final collapsed = ref.watch(collapsedModulesProvider);
 
     final byModule = <String, List<ClientServiceInfo>>{};
     for (final s in services) {
@@ -32,6 +36,20 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final runningCount = services.where((s) =>
         serviceStates[s.id]?.status == ProcessStatus.running).length;
 
+    // A module is "active" if any of its services is currently running or
+    // orphaned. Stopped-only modules get filtered out when hideInactive is on.
+    final activeByModule = {
+      for (final entry in byModule.entries)
+        entry.key: entry.value.any((s) {
+          final st = serviceStates[s.id]?.status;
+          return st == ProcessStatus.running || st == ProcessStatus.orphaned;
+        }),
+    };
+    final visibleByModule = hideInactive
+        ? Map.fromEntries(byModule.entries.where((e) => activeByModule[e.key]!))
+        : byModule;
+    final hiddenCount = byModule.length - visibleByModule.length;
+
     return Scaffold(
       appBar: _buildAppBar(),
       body: Padding(
@@ -39,10 +57,16 @@ class _MainScreenState extends ConsumerState<MainScreen> {
         child: Row(
           children: [
             _Sidebar(
-              byModule: byModule,
+              byModule: visibleByModule,
               states: serviceStates,
-              collapsed: collapsedModules,
               runningCount: runningCount,
+              hideInactive: hideInactive,
+              hiddenCount: hiddenCount,
+              onToggleHideInactive: () =>
+                  ref.read(hideInactiveProvider.notifier).state = !hideInactive,
+              collapsed: collapsed,
+              onToggleCollapsed: (name) =>
+                  ref.read(collapsedModulesProvider.notifier).toggle(name),
               selectedId: _selectedId,
               onSelect: (id) => setState(() => _selectedId = id),
             ),
@@ -91,6 +115,11 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                 const SecretStoreStatusIndicator(),
                 const McpStatusIndicator(),
                 IconButton(
+                  tooltip: 'Reload workspace',
+                  onPressed: _reloadWorkspace,
+                  icon: const Icon(Icons.refresh),
+                ),
+                IconButton(
                   tooltip: 'Settings',
                   onPressed: () => showDialog(
                     context: context,
@@ -107,6 +136,92 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _reloadWorkspace() async {
+    try {
+      final diff = await ref.read(apiClientProvider).reloadWorkspace();
+      await ref.read(workspaceStateProvider.notifier).refresh();
+      if (!mounted) return;
+      final added = (diff['added'] as List).cast<String>();
+      final removed = (diff['removed'] as List).cast<String>();
+      final changed = (diff['changed'] as List).cast<String>();
+      final summary = _summariseDiff(added, removed, changed);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Workspace reloaded · $summary')),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showWorkspaceReloadBlocked(e);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Reload failed: $e')),
+      );
+    }
+  }
+
+  String _summariseDiff(List<String> added, List<String> removed, List<String> changed) {
+    if (added.isEmpty && removed.isEmpty && changed.isEmpty) return 'no changes';
+    final parts = <String>[];
+    if (added.isNotEmpty) parts.add('+${added.length}: ${added.join(", ")}');
+    if (removed.isNotEmpty) parts.add('-${removed.length}: ${removed.join(", ")}');
+    if (changed.isNotEmpty) parts.add('~${changed.length}: ${changed.join(", ")}');
+    return parts.join(' · ');
+  }
+
+  void _showWorkspaceReloadBlocked(ApiException e) {
+    String message = e.message;
+    List<Map<String, dynamic>> running = const [];
+    List<String> added = const [], removed = const [], changed = const [];
+    try {
+      final body = jsonDecode(e.message) as Map<String, dynamic>;
+      message = (body['error'] as String?) ?? message;
+      final list = body['runningServices'];
+      if (list is List) running = list.cast<Map<String, dynamic>>();
+      added = (body['added'] as List?)?.cast<String>() ?? const [];
+      removed = (body['removed'] as List?)?.cast<String>() ?? const [];
+      changed = (body['changed'] as List?)?.cast<String>() ?? const [];
+    } catch (_) {}
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Workspace reload blocked'),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message),
+              if (running.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('Running services in affected projects:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 4),
+                ...running.map((s) => Text(
+                    '  • ${s['id']}  (${s['status']})',
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12))),
+              ],
+              const SizedBox(height: 12),
+              const Text('Pending changes on disk:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(height: 4),
+              if (added.isNotEmpty) Text('  added: ${added.join(", ")}'),
+              if (removed.isNotEmpty) Text('  removed: ${removed.join(", ")}'),
+              if (changed.isNotEmpty) Text('  changed: ${changed.join(", ")}'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -150,16 +265,24 @@ class _Title extends ConsumerWidget {
 class _Sidebar extends ConsumerWidget {
   final Map<String, List<ClientServiceInfo>> byModule;
   final Map<String, ServiceStateDto> states;
-  final Set<String> collapsed;
   final int runningCount;
+  final bool hideInactive;
+  final int hiddenCount;
+  final VoidCallback onToggleHideInactive;
+  final Set<String> collapsed;
+  final void Function(String) onToggleCollapsed;
   final String? selectedId;
   final void Function(String?) onSelect;
 
   const _Sidebar({
     required this.byModule,
     required this.states,
-    required this.collapsed,
     required this.runningCount,
+    required this.hideInactive,
+    required this.hiddenCount,
+    required this.onToggleHideInactive,
+    required this.collapsed,
+    required this.onToggleCollapsed,
     required this.selectedId,
     required this.onSelect,
   });
@@ -176,7 +299,7 @@ class _Sidebar extends ConsumerWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Row(
               children: [
                 const Text('Services',
@@ -185,6 +308,21 @@ class _Sidebar extends ConsumerWidget {
                 Text(
                   '$runningCount running',
                   style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.6)),
+                ),
+                IconButton(
+                  tooltip: hideInactive
+                      ? 'Showing only active modules — click to show all'
+                      : 'Hide inactive modules',
+                  icon: Icon(
+                    hideInactive ? Icons.filter_alt : Icons.filter_alt_outlined,
+                    size: 16,
+                    color: hideInactive
+                        ? const Color(0xFF22D3EE)
+                        : Colors.white.withOpacity(0.7),
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+                  onPressed: onToggleHideInactive,
                 ),
               ],
             ),
@@ -202,13 +340,37 @@ class _Sidebar extends ConsumerWidget {
                       name: entry.key,
                       services: entry.value,
                       states: states,
-                      collapsed: collapsed,
+                      expanded: !collapsed.contains(entry.key),
+                      onToggleCollapsed: () => onToggleCollapsed(entry.key),
                       selectedId: selectedId,
                       onSelect: onSelect,
                     )),
               ],
             ),
           ),
+          if (hideInactive && hiddenCount > 0) ...[
+            const Divider(height: 1),
+            InkWell(
+              onTap: onToggleHideInactive,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.visibility_outlined,
+                        size: 14, color: Colors.white.withOpacity(0.6)),
+                    const SizedBox(width: 6),
+                    Text(
+                      '+ $hiddenCount inactive · show all',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -254,11 +416,12 @@ class _DashboardItem extends StatelessWidget {
   }
 }
 
-class _ModuleGroup extends ConsumerWidget {
+class _ModuleGroup extends StatelessWidget {
   final String name;
   final List<ClientServiceInfo> services;
   final Map<String, ServiceStateDto> states;
-  final Set<String> collapsed;
+  final bool expanded;
+  final VoidCallback onToggleCollapsed;
   final String? selectedId;
   final void Function(String?) onSelect;
 
@@ -266,20 +429,19 @@ class _ModuleGroup extends ConsumerWidget {
     required this.name,
     required this.services,
     required this.states,
-    required this.collapsed,
+    required this.expanded,
+    required this.onToggleCollapsed,
     required this.selectedId,
     required this.onSelect,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final expanded = !collapsed.contains(name);
+  Widget build(BuildContext context) {
     return Column(
       children: [
         InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () =>
-              ref.read(workspaceStateProvider.notifier).toggleCollapsed(name),
+          onTap: onToggleCollapsed,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
             child: Row(

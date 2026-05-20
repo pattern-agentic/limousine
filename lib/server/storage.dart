@@ -63,10 +63,10 @@ class Storage {
   /// from a failed clone counts as *not* present — the UI shows the clone
   /// button, `Git.clone` moves the partial directory aside before retrying.
   static Future<bool> projectExistsOnDisk(
-    String workspacePath,
+    String rootDir,
     String pathOnDisk,
   ) async {
-    final dir = Directory(resolvePath(workspacePath, pathOnDisk));
+    final dir = Directory(resolvePath(rootDir, pathOnDisk));
     if (!await dir.exists()) return false;
     await for (final entity in dir.list(followLinks: false)) {
       if (p.basename(entity.path) != '.git') return true;
@@ -74,9 +74,13 @@ class Storage {
     return false;
   }
 
-  static String resolvePath(String workspacePath, String pathOnDisk) {
+  /// Resolve a workspace-relative `path-on-disk` against [rootDir]. Absolute
+  /// paths in the .wksp bypass this and are returned as-is. [rootDir] is
+  /// either the parent of the workspace file (default) or `--clone-root` if
+  /// the server was started with one.
+  static String resolvePath(String rootDir, String pathOnDisk) {
     if (p.isAbsolute(pathOnDisk)) return pathOnDisk;
-    return p.normalize(p.join(p.dirname(workspacePath), pathOnDisk));
+    return p.normalize(p.join(rootDir, pathOnDisk));
   }
 
   static String _sanitize(String serviceId) => serviceId.replaceAll('/', '_');

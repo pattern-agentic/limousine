@@ -164,6 +164,24 @@ class ApiClient {
   Future<void> cloneProject(String projectName) =>
       _post('/api/projects/$projectName/clone');
 
+  /// Reload one project's `limousine.proj`. Throws [ApiException] with a JSON
+  /// body listing running services on 409.
+  Future<void> reloadProject(String projectName) =>
+      _post('/api/projects/$projectName/reload');
+
+  /// Re-read the .wksp from disk. Throws [ApiException] with a JSON body on
+  /// 409 (some removed/changed project still has running services).
+  /// Returns the diff on success.
+  Future<Map<String, dynamic>> reloadWorkspace() async {
+    final r = await _http.post(
+      _u('/api/workspace/reload'),
+      headers: const {'content-type': 'application/json'},
+      body: '{}',
+    );
+    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.body);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
   Future<SecretsKeysDto> getSecretsKeys(String serviceId) async {
     final json = await _get('/api/services/$serviceId/secrets/keys');
     return SecretsKeysDto.fromJson(json);

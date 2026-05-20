@@ -49,14 +49,12 @@ class McpConfig {
 class Workspace {
   final String name;
   final Map<String, ProjectRef> projects;
-  final List<String> collapsedModules;
   final String? gitSshKeyPath;
   final McpConfig? mcpConfig;
 
   Workspace({
     required this.name,
     required this.projects,
-    this.collapsedModules = const [],
     this.gitSshKeyPath,
     this.mcpConfig,
   });
@@ -68,22 +66,24 @@ class Workspace {
       projects: projectsJson.map(
         (k, v) => MapEntry(k, ProjectRef.fromJson(k, v)),
       ),
-      collapsedModules: List<String>.from(json['collapsed-modules'] ?? []),
       gitSshKeyPath: json['git-ssh-key-path'],
       mcpConfig: json['mcp'] != null ? McpConfig.fromJson(json['mcp']) : null,
     );
   }
 
+  // `collapsed-modules` was previously persisted here but caused git churn on
+  // every UI interaction. It's now ephemeral (in-memory in the client only),
+  // and `toJson` deliberately doesn't emit it. Old .wksp files that still
+  // carry it are tolerated on read — the field is just ignored. The next save
+  // strips it.
   Map<String, dynamic> toJson() => {
     'name': name,
     'projects': projects.map((k, v) => MapEntry(k, v.toJson())),
-    'collapsed-modules': collapsedModules,
     if (gitSshKeyPath != null) 'git-ssh-key-path': gitSshKeyPath,
     if (mcpConfig != null) 'mcp': mcpConfig!.toJson(),
   };
 
   Workspace copyWith({
-    List<String>? collapsedModules,
     String? gitSshKeyPath,
     bool clearGitSshKeyPath = false,
     McpConfig? mcpConfig,
@@ -91,7 +91,6 @@ class Workspace {
     return Workspace(
       name: name,
       projects: projects,
-      collapsedModules: collapsedModules ?? this.collapsedModules,
       gitSshKeyPath: clearGitSshKeyPath ? null : (gitSshKeyPath ?? this.gitSshKeyPath),
       mcpConfig: mcpConfig ?? this.mcpConfig,
     );

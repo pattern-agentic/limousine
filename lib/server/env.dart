@@ -34,10 +34,13 @@ class Env {
     return result;
   }
 
-  static Future<Map<String, String>> buildProcessEnv(
-    String? activeEnvPath,
-    String? activeSecretsPath,
-  ) async {
+  /// Base env passed to every child process limousine spawns: host env +
+  /// PATH/TERM tweaks. Deliberately does NOT load `active-env-file` or
+  /// `active-secrets-env-file` — each project's start command is responsible
+  /// for its own env loading (typically `dotenv -f env.dev.meta run -- sops
+  /// exec-env .env.secrets -- <real cmd>`). The fields in limousine.proj's
+  /// config block are now pure metadata for the editor.
+  static Future<Map<String, String>> buildBaseEnv() async {
     final env = Map<String, String>.from(Platform.environment);
 
     final currentPath = env['PATH'] ?? '';
@@ -50,8 +53,6 @@ class Env {
     env['COLORTERM'] = 'truecolor';
     env['FORCE_COLOR'] = '1';
     env['CLICOLOR_FORCE'] = '1';
-    if (activeEnvPath != null) env.addAll(await loadEnvFile(activeEnvPath));
-    if (activeSecretsPath != null) env.addAll(await loadEnvFile(activeSecretsPath));
     return env;
   }
 

@@ -50,26 +50,32 @@ class WorkspaceStateNotifier extends AsyncNotifier<WorkspaceState> {
     await refresh();
   }
 
-  Future<void> toggleCollapsed(String moduleName) async {
-    final current = state.valueOrNull?.workspace;
-    if (current == null) return;
-    final collapsed = Set<String>.from(current.collapsedModules);
-    if (!collapsed.add(moduleName)) collapsed.remove(moduleName);
-    final updated = current.copyWith(collapsedModules: collapsed.toList());
-    state = AsyncData(WorkspaceState(
-      open: true,
-      path: state.valueOrNull?.path,
-      workspace: updated,
-      projects: state.valueOrNull?.projects ?? {},
-    ));
-    await saveWorkspace(updated);
-  }
 }
 
-final collapsedModulesProvider = Provider<Set<String>>((ref) {
-  final ws = ref.watch(workspaceStateProvider).valueOrNull;
-  return ws?.workspace?.collapsedModules.toSet() ?? {};
-});
+/// In-memory only. When true, the sidebar hides module groups that have no
+/// running or orphaned services. Deliberately not persisted to the .wksp
+/// file — workspace files live in git, and per-dev UI state would cause
+/// noisy diffs.
+final hideInactiveProvider = StateProvider<bool>((_) => false);
+
+/// In-memory, per-session set of collapsed module names. Resets on page
+/// reload. Also deliberately not persisted to the .wksp file (was, until we
+/// noticed the git churn).
+final collapsedModulesProvider =
+    NotifierProvider<CollapsedModulesNotifier, Set<String>>(
+  CollapsedModulesNotifier.new,
+);
+
+class CollapsedModulesNotifier extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => const {};
+
+  void toggle(String name) {
+    final next = Set<String>.from(state);
+    if (!next.add(name)) next.remove(name);
+    state = next;
+  }
+}
 
 final globalConfigProvider = FutureProvider<GlobalConfig>((ref) async {
   return ref.watch(apiClientProvider).getGlobalConfig();

@@ -31,26 +31,27 @@ Response _error(String message, {int status = 400}) =>
 /// Pulls the bearer password from `Authorization: Bearer <pw>` and validates
 /// it against the secret store's password. Returns the password if valid, or
 /// a 401 response. Caller short-circuits on the response.
-({String? password, Response? failure}) _requireSecretStoreHeader(
+({String? ageKey, Response? failure}) _requireSecretStoreHeader(
   Request req,
   SecretStore store,
 ) {
   final auth = req.headers['authorization'];
   if (auth == null || !auth.toLowerCase().startsWith('bearer ')) {
     return (
-      password: null,
-      failure: _error('Missing Authorization: Bearer <password> header',
+      ageKey: null,
+      failure: _error(
+          'Missing Authorization: Bearer <age-private-key> header',
           status: 401),
     );
   }
   final candidate = auth.substring(7);
-  if (!store.verifyHeaderPassword(candidate)) {
+  if (!store.verifyHeaderKey(candidate)) {
     return (
-      password: null,
-      failure: _error('Bad secret-store password', status: 401),
+      ageKey: null,
+      failure: _error('Bad age private key', status: 401),
     );
   }
-  return (password: candidate, failure: null);
+  return (ageKey: candidate, failure: null);
 }
 
 Router buildApiRouter(
@@ -101,7 +102,6 @@ Router buildApiRouter(
     await wsm.saveWorkspace(Workspace(
       name: current.name,
       projects: current.projects,
-      collapsedModules: updated.collapsedModules,
       gitSshKeyPath: updated.gitSshKeyPath,
       mcpConfig: updated.mcpConfig,
     ));
@@ -150,7 +150,7 @@ Router buildApiRouter(
       return _error('Project already exists on disk', status: 409);
     }
     final targetPath = loaded?.resolvedPath ??
-        Storage.resolvePath(wsm.workspacePath!, ref.pathOnDisk);
+        Storage.resolvePath(wsm.cloneRoot!, ref.pathOnDisk);
     final result = await Git.clone(
       ref.gitRepoUrl!,
       targetPath,
@@ -164,6 +164,71 @@ Router buildApiRouter(
     }
     await wsm.reloadProjects();
     return _json({'ok': true, 'stdout': result.stdout, 'stderr': result.stderr});
+  });
+
+  router.post('/api/projects/<name>/reload', (Request _, String name) async {
+    final loaded = wsm.projects[name];
+    if (loaded == null) return _error('Project not found: $name', status: 404);
+    final blocking = wsm
+        .allServices()
+        .where((s) => s.projectName == name)
+        .where((s) {
+          final st = sm.states[s.id];
+          return st != null && st.status != ProcessStatus.stopped;
+        })
+        .map((s) => {'id': s.id, 'status': sm.states[s.id]!.status.name})
+        .toList();
+    if (blocking.isNotEmpty) {
+      return _json({
+        'error': 'Project has active services. Stop them first.',
+        'runningServices': blocking,
+      }, status: 409);
+    }
+    await wsm.reloadProject(name);
+    return _json({'ok': true});
+  });
+
+  router.post('/api/workspace/reload', (Request _) async {
+    final WorkspaceDiff diff;
+    try {
+      diff = await wsm.peekDiff();
+    } catch (e) {
+      return _error('Failed to re-read workspace: $e', status: 500);
+    }
+
+    // Blocked: any removed-or-changed project that still has a running /
+    // orphaned service. Unchanged projects (and new ones) are always safe.
+    final blocking = <Map<String, String>>[];
+    final affectedProjects = {...diff.removed, ...diff.changed};
+    for (final s in wsm.allServices()) {
+      if (!affectedProjects.contains(s.projectName)) continue;
+      final st = sm.states[s.id];
+      if (st != null && st.status != ProcessStatus.stopped) {
+        blocking.add({
+          'id': s.id,
+          'status': st.status.name,
+          'project': s.projectName,
+        });
+      }
+    }
+    if (blocking.isNotEmpty) {
+      return _json({
+        'error': 'Workspace reload would touch projects with running services. '
+            'Stop them first or quit and restart limousine.',
+        'runningServices': blocking,
+        'added': diff.added,
+        'removed': diff.removed,
+        'changed': diff.changed,
+      }, status: 409);
+    }
+
+    await wsm.applyDiff(diff);
+    return _json({
+      'ok': true,
+      'added': diff.added,
+      'removed': diff.removed,
+      'changed': diff.changed,
+    });
   });
 
   router.get('/api/services', (Request _) {

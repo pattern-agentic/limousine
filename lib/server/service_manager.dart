@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:logging/logging.dart';
-import 'package:path/path.dart' as p;
 import '../core/dto.dart';
 import '../core/module.dart';
 import 'env.dart';
@@ -87,18 +86,18 @@ class ServiceManager {
     final shell = _findShell();
     if (shell == null) throw StateError('No shell available');
 
-    final envPath = p.join(info.projectPath, info.moduleConfig.activeEnvFile);
-    final secretsPath = p.join(info.projectPath, info.moduleConfig.activeSecretsEnvFile);
-    final env = await Env.buildProcessEnv(envPath, null);
-    // Encrypted secrets — refuse to start if the store can't decrypt them.
-    try {
-      final secrets = await secretStore.loadSecrets(secretsPath);
-      env.addAll(secrets);
-    } on SecretStoreLockedException catch (e) {
-      throw StateError('Cannot start $serviceId: ${e.message}');
-    } on Exception catch (e) {
-      throw StateError('Cannot start $serviceId: failed to load secrets ($e)');
+    final env = await Env.buildBaseEnv();
+    // Forward the age private key into the child so its in-command `sops
+    // exec-env …` invocation can decrypt the per-project .env.secrets file.
+    // The child (and any subprocess it spawns) will see SOPS_AGE_KEY in its
+    // environment — same trust model as forwarding SSH_AUTH_SOCK.
+    final ageKey = secretStore.privateKey;
+    if (ageKey != null) {
+      env['SOPS_AGE_KEY'] = ageKey;
     }
+    // Limousine no longer injects env file or decrypted secrets here — the
+    // project's start command does that itself via dotenv + sops. See
+    // env.dart's buildBaseEnv() for the rationale.
 
     final pty = Pty.start(
       shell,

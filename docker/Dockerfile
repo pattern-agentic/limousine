@@ -14,6 +14,8 @@ ARG KUBECTL_VERSION=1.32.2
 ARG AWS_CLI_VERSION=2.22.0
 ARG NATS_CLI_VERSION=0.2.3
 ARG DOCKER_CLI_VERSION=29.2.1
+ARG SOPS_VERSION=3.11.0
+ARG AGE_VERSION=1.2.1
 
 FROM ubuntu:25.04
 
@@ -23,6 +25,8 @@ ARG KUBECTL_VERSION
 ARG AWS_CLI_VERSION
 ARG NATS_CLI_VERSION
 ARG DOCKER_CLI_VERSION
+ARG SOPS_VERSION
+ARG AGE_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH=/opt/limousine/lib
@@ -92,9 +96,28 @@ https://download.docker.com/linux/ubuntu plucky stable" \
     && rm -rf /var/lib/apt/lists/* \
     && docker --version
 
-# python-dotenv CLI (pa-agent-supervisor uses `dotenv -f X run …`).
+# python-dotenv CLI (every project's start command uses `dotenv -f X run …`).
 RUN pipx install --global "python-dotenv[cli]" \
     && dotenv --version || true
+
+# age — modern file-encryption tool. Used to derive the public key from the
+# user-supplied age private key (`age-keygen -y`).
+RUN curl -fsSL \
+        "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" \
+        -o /tmp/age.tgz \
+    && tar -xzf /tmp/age.tgz -C /tmp \
+    && install -m 0755 /tmp/age/age /tmp/age/age-keygen /usr/local/bin/ \
+    && rm -rf /tmp/age /tmp/age.tgz \
+    && age --version && age-keygen --version 2>&1 | head -1
+
+# sops — declarative secrets manager. Encrypts dotenv files per-value with
+# the user's age recipient. Limousine shells out to it for read/write/edit
+# of .env.secrets; project commands use `sops exec-env` to decrypt at runtime.
+RUN curl -fsSL \
+        "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64" \
+        -o /usr/local/bin/sops \
+    && chmod +x /usr/local/bin/sops \
+    && sops --version
 
 # Pre-trust github.com SSH host keys so `git clone ssh://git@github.com/…` from
 # inside the container doesn't hang on a "yes/no/[fingerprint]" prompt the user
@@ -111,7 +134,10 @@ COPY build/bin/limousine-server      /opt/limousine/limousine-server
 COPY build/bin/libflutter_pty.so     /opt/limousine/lib/libflutter_pty.so
 COPY build/web/                      /opt/limousine/web/
 COPY docker/entrypoint.sh            /usr/local/bin/limousine-entrypoint.sh
-RUN chmod +x /usr/local/bin/limousine-entrypoint.sh
+# The wrapper is bundled inside the image so users can extract it via the
+# `export-limousine-script` subcommand without round-tripping through GitHub.
+COPY scripts/limousine               /opt/limousine/scripts/limousine
+RUN chmod +x /usr/local/bin/limousine-entrypoint.sh /opt/limousine/scripts/limousine
 
 EXPOSE 7891 6891
 

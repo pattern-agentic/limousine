@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/dto.dart';
+import '../../../api_client.dart';
 import '../../../providers/api_provider.dart';
 import '../../../providers/workspace_provider.dart';
 import 'service_row.dart';
@@ -31,6 +33,69 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
     }
   }
 
+  Future<void> _reloadProjectFile() async {
+    try {
+      await ref.read(apiClientProvider).reloadProject(widget.project.name);
+      await ref.read(workspaceStateProvider.notifier).refresh();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${widget.project.name}: limousine.proj reloaded')),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showReloadBlockedDialog(e);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Reload failed: $e')),
+      );
+    }
+  }
+
+  void _showReloadBlockedDialog(ApiException e) {
+    List<String> running = const [];
+    String message = e.message;
+    try {
+      final body = jsonDecode(e.message) as Map<String, dynamic>;
+      message = (body['error'] as String?) ?? message;
+      final list = body['runningServices'];
+      if (list is List) {
+        running = list.map((s) => (s as Map)['id'].toString()).toList();
+      }
+    } catch (_) {}
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reload blocked'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message),
+              if (running.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('Running services:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 4),
+                ...running.map((id) => Text('  • $id',
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontSize: 12))),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = widget.project;
@@ -59,13 +124,36 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (project.projectData?.agentGuide != null)
-              IconButton(
-                icon: const Icon(Icons.info_outline, size: 20),
-                tooltip: 'Agent guide',
-                onPressed: () => _showGuide(context),
-              ),
             if (canClone) _cloneButton(),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 20),
+              tooltip: 'Project actions',
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'reload',
+                  child: ListTile(
+                    leading: Icon(Icons.refresh, size: 18),
+                    title: Text('Reload project file'),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  ),
+                ),
+                if (project.projectData?.agentGuide != null)
+                  const PopupMenuItem(
+                    value: 'agent-guide',
+                    child: ListTile(
+                      leading: Icon(Icons.info_outline, size: 18),
+                      title: Text('Show agent guide'),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                  ),
+              ],
+              onSelected: (v) {
+                if (v == 'reload') _reloadProjectFile();
+                if (v == 'agent-guide') _showGuide(context);
+              },
+            ),
           ],
         ),
         children: [
