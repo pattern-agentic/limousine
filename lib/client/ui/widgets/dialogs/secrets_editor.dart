@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/dto.dart';
 import '../../../providers/api_provider.dart';
 import '../../../providers/secret_store_provider.dart';
-import 'env_editor.dart' show EnvEditorPanel;
+import 'env_editor.dart' show EnvEditorPanel, kEditorFieldDecoration;
 
 /// Two-phase dialog:
 ///   Phase 1: keys-only preview, no password sent. Shows what is currently
@@ -13,7 +13,14 @@ import 'env_editor.dart' show EnvEditorPanel;
 ///            sent as an Authorization header on each value-bearing call.
 class SecretsEditorDialog extends ConsumerStatefulWidget {
   final String serviceId;
-  const SecretsEditorDialog({super.key, required this.serviceId});
+  final String? sourceFile;
+  final String? activeFile;
+  const SecretsEditorDialog({
+    super.key,
+    required this.serviceId,
+    this.sourceFile,
+    this.activeFile,
+  });
 
   @override
   ConsumerState<SecretsEditorDialog> createState() => _SecretsEditorDialogState();
@@ -37,14 +44,35 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
   final List<String> _order = [];
   final Set<String> _revealed = {};
 
+  // Sync the two panels' scroll positions. See env_editor.dart for the
+  // pattern — clamped jumpTo + a guard to break listener loops. Once the
+  // shorter side hits its bottom, the longer one keeps scrolling alone.
+  final ScrollController _scrollSource = ScrollController();
+  final ScrollController _scrollActive = ScrollController();
+  bool _syncing = false;
+
   @override
   void initState() {
     super.initState();
+    _scrollSource.addListener(() => _mirror(_scrollSource, _scrollActive));
+    _scrollActive.addListener(() => _mirror(_scrollActive, _scrollSource));
     _loadKeys();
+  }
+
+  void _mirror(ScrollController from, ScrollController to) {
+    if (_syncing) return;
+    if (!to.hasClients) return;
+    final target = from.offset.clamp(0.0, to.position.maxScrollExtent);
+    if ((to.offset - target).abs() < 0.5) return;
+    _syncing = true;
+    to.jumpTo(target);
+    _syncing = false;
   }
 
   @override
   void dispose() {
+    _scrollSource.dispose();
+    _scrollActive.dispose();
     for (final c in _controllers.values) {
       c.dispose();
     }
@@ -201,9 +229,14 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final width = (size.width - 48).clamp(800.0, 1800.0);
+    final height = (size.height - 48).clamp(500.0, 1200.0);
     return Dialog(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1100, maxHeight: 700),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: SizedBox(
+        width: width,
+        height: height,
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -273,14 +306,18 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
         Expanded(
           child: EnvEditorPanel(
             title: 'Source · ${sourceEntries.length} key${sourceEntries.length == 1 ? '' : 's'}',
+            filePath: widget.sourceFile,
             missing: keys.sourceExists ? null : 'source file not found',
             child: ListView.builder(
+              controller: _scrollSource,
               padding: const EdgeInsets.all(8),
               itemCount: sourceEntries.length,
-              itemBuilder: (_, i) => _ReadOnlyKvRow(
-                keyName: sourceEntries[i].key,
-                value: sourceEntries[i].value,
-                masked: false,
+              itemBuilder: (_, i) => _RowCard(
+                child: _ReadOnlyKvRow(
+                  keyName: sourceEntries[i].key,
+                  value: sourceEntries[i].value,
+                  masked: false,
+                ),
               ),
             ),
           ),
@@ -289,6 +326,7 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
         Expanded(
           child: EnvEditorPanel(
             title: 'Active · ${keys.activeKeys.length} key${keys.activeKeys.length == 1 ? '' : 's'}',
+            filePath: widget.activeFile,
             missing: keys.activeExists
                 ? (keys.readError ?? 'values hidden — unlock to view')
                 : 'no encrypted file yet (will be created on first save)',
@@ -296,12 +334,15 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
               children: [
                 Expanded(
                   child: ListView.builder(
+                    controller: _scrollActive,
                     padding: const EdgeInsets.all(8),
                     itemCount: keys.activeKeys.length,
-                    itemBuilder: (_, i) => _ReadOnlyKvRow(
-                      keyName: keys.activeKeys[i],
-                      value: '••••••••',
-                      masked: true,
+                    itemBuilder: (_, i) => _RowCard(
+                      child: _ReadOnlyKvRow(
+                        keyName: keys.activeKeys[i],
+                        value: '••••••••',
+                        masked: true,
+                      ),
                     ),
                   ),
                 ),
@@ -336,19 +377,24 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
     final entries = cmp.sourceContent.entries.toList();
     return EnvEditorPanel(
       title: 'Source · ${entries.length} key${entries.length == 1 ? '' : 's'}',
+      filePath: widget.sourceFile,
       missing: cmp.sourceExists ? null : 'source file not found',
       child: ListView.builder(
+        controller: _scrollSource,
         padding: const EdgeInsets.all(8),
         itemCount: entries.length,
         itemBuilder: (_, i) {
           final e = entries[i];
           final isMissingInActive = !_controllers.containsKey(e.key);
-          return _SourceActionRow(
-            keyName: e.key,
-            value: e.value,
-            missingInActive: isMissingInActive,
-            onCopy: isMissingInActive ? () => _copyFromSource(e.key) : null,
-            onOverwrite: !isMissingInActive ? () => _copyFromSource(e.key) : null,
+          return _RowCard(
+            child: _SourceActionRow(
+              keyName: e.key,
+              value: e.value,
+              missingInActive: isMissingInActive,
+              onCopy: isMissingInActive ? () => _copyFromSource(e.key) : null,
+              onOverwrite:
+                  !isMissingInActive ? () => _copyFromSource(e.key) : null,
+            ),
           );
         },
       ),
@@ -360,26 +406,30 @@ class _SecretsEditorDialogState extends ConsumerState<SecretsEditorDialog> {
     return EnvEditorPanel(
       title: 'Active · ${_order.length} key${_order.length == 1 ? '' : 's'}'
           '${extra > 0 ? ' · $extra extra' : ''}',
+      filePath: widget.activeFile,
       child: Column(
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollActive,
               padding: const EdgeInsets.all(8),
               itemCount: _order.length,
               itemBuilder: (_, i) {
                 final key = _order[i];
                 final isExtra = !cmp.sourceContent.containsKey(key);
                 final revealed = _revealed.contains(key);
-                return _SecretEditRow(
-                  keyName: key,
-                  controller: _controllers[key]!,
-                  revealed: revealed,
-                  extra: isExtra,
-                  onToggleReveal: () => setState(() {
-                    revealed ? _revealed.remove(key) : _revealed.add(key);
-                  }),
-                  onChanged: _markDirty,
-                  onRemove: () => _removeKey(key),
+                return _RowCard(
+                  child: _SecretEditRow(
+                    keyName: key,
+                    controller: _controllers[key]!,
+                    revealed: revealed,
+                    extra: isExtra,
+                    onToggleReveal: () => setState(() {
+                      revealed ? _revealed.remove(key) : _revealed.add(key);
+                    }),
+                    onChanged: _markDirty,
+                    onRemove: () => _removeKey(key),
+                  ),
                 );
               },
             ),
@@ -445,15 +495,43 @@ class _ReadOnlyKvRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
-      child: Text(
-        '$keyName=$value',
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          color: masked ? Colors.white60 : Colors.white70,
-        ),
-        overflow: TextOverflow.ellipsis,
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const SizedBox(width: 14),
+              const SizedBox(width: 6),
+              Expanded(
+                child: SelectableText(
+                  keyName,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFE5E7EB),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 28),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 20, right: 4, bottom: 4),
+            child: SelectableText(
+              value,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.4,
+                color: masked ? Colors.white60 : const Color(0xFF94A3B8),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -477,41 +555,70 @@ class _SourceActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (missingInActive)
-            const Icon(Icons.warning, color: Colors.orange, size: 14)
-          else
-            const SizedBox(width: 14),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              '$keyName=$value',
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                color: missingInActive ? Colors.orange : Colors.white70,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (missingInActive)
+                const Tooltip(
+                  message: 'Missing in active',
+                  child: Icon(Icons.warning, color: Colors.orange, size: 14),
+                )
+              else
+                const SizedBox(width: 14),
+              const SizedBox(width: 6),
+              Expanded(
+                child: SelectableText(
+                  keyName,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: missingInActive
+                        ? Colors.orange
+                        : const Color(0xFFE5E7EB),
+                  ),
+                ),
               ),
-              overflow: TextOverflow.ellipsis,
+              if (onCopy != null)
+                IconButton(
+                  tooltip: 'Copy to active',
+                  icon: const Icon(Icons.arrow_forward, size: 16),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 28, height: 28),
+                  onPressed: onCopy,
+                )
+              else if (onOverwrite != null)
+                IconButton(
+                  tooltip: 'Overwrite active with source value',
+                  icon: const Icon(Icons.refresh, size: 14),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 28, height: 28),
+                  onPressed: onOverwrite,
+                )
+              else
+                const SizedBox(width: 28),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 20, right: 4, bottom: 4),
+            child: SelectableText(
+              value,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                height: 1.4,
+                color: Color(0xFF94A3B8),
+              ),
             ),
           ),
-          if (onCopy != null)
-            IconButton(
-              tooltip: 'Copy to active',
-              icon: const Icon(Icons.arrow_forward, size: 16),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-              onPressed: onCopy,
-            )
-          else if (onOverwrite != null)
-            IconButton(
-              tooltip: 'Overwrite active with source value',
-              icon: const Icon(Icons.refresh, size: 14),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-              onPressed: onOverwrite,
-            ),
         ],
       ),
     );
@@ -539,52 +646,68 @@ class _SecretEditRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final obscured = !revealed;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (extra)
-            const Tooltip(
-              message: 'Not in source — likely stale',
-              child: Icon(Icons.warning, color: Colors.orange, size: 14),
-            )
-          else
-            const SizedBox(width: 14),
-          const SizedBox(width: 4),
-          SizedBox(
-            width: 180,
-            child: Text(
-              keyName,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (extra)
+                const Tooltip(
+                  message: 'Not in source — likely stale',
+                  child: Icon(Icons.warning, color: Colors.orange, size: 14),
+                )
+              else
+                const SizedBox(width: 14),
+              const SizedBox(width: 6),
+              Expanded(
+                child: SelectableText(
+                  keyName,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFE5E7EB),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: revealed ? 'Hide value' : 'Reveal value',
+                icon: Icon(
+                    revealed ? Icons.visibility_off : Icons.visibility,
+                    size: 14),
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 28, height: 28),
+                onPressed: onToggleReveal,
+              ),
+              IconButton(
+                tooltip: 'Remove',
+                icon: const Icon(Icons.close, size: 14),
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 28, height: 28),
+                onPressed: onRemove,
+              ),
+            ],
           ),
-          Expanded(
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 20, right: 4, bottom: 4),
             child: TextField(
               controller: controller,
-              obscureText: !revealed,
+              obscureText: obscured,
               onChanged: (_) => onChanged(),
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              decoration: const InputDecoration(
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                border: OutlineInputBorder(),
-              ),
+              minLines: 1,
+              maxLines: obscured ? 1 : 6,
+              style: const TextStyle(
+                  fontFamily: 'monospace', fontSize: 13, height: 1.4),
+              decoration: kEditorFieldDecoration,
             ),
-          ),
-          IconButton(
-            tooltip: revealed ? 'Hide value' : 'Reveal value',
-            icon: Icon(revealed ? Icons.visibility_off : Icons.visibility, size: 14),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            onPressed: onToggleReveal,
-          ),
-          IconButton(
-            tooltip: 'Remove',
-            icon: const Icon(Icons.close, size: 14),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            onPressed: onRemove,
           ),
         ],
       ),
@@ -706,6 +829,26 @@ class _NewKeyPromptState extends State<_NewKeyPrompt> {
           child: const Text('Add'),
         ),
       ],
+    );
+  }
+}
+
+/// Visual wrapper around every row in either panel — mirrors env_editor.dart.
+class _RowCard extends StatelessWidget {
+  final Widget child;
+  const _RowCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111B2D),
+        border: Border.all(color: const Color(0xFF1E293B)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: child,
     );
   }
 }

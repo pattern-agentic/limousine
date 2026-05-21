@@ -1,10 +1,10 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/dto.dart';
-import '../../../api_client.dart';
 import '../../../providers/api_provider.dart';
+import '../../../providers/git_status_provider.dart';
 import '../../../providers/workspace_provider.dart';
+import 'git_chip_dialogs.dart';
 import 'service_row.dart';
 
 class ProjectCard extends ConsumerStatefulWidget {
@@ -17,6 +17,27 @@ class ProjectCard extends ConsumerStatefulWidget {
 
 class _ProjectCardState extends ConsumerState<ProjectCard> {
   bool _cloning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Each card initiates its own status load on mount. Local-only, cheap.
+    if (widget.project.existsOnDisk) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(gitStatusProvider.notifier).load(widget.project.name);
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ProjectCard old) {
+    super.didUpdateWidget(old);
+    // Project went from missing → cloned: kick off a fresh status load.
+    if (!old.project.existsOnDisk && widget.project.existsOnDisk) {
+      ref.read(gitStatusProvider.notifier).load(widget.project.name);
+    }
+  }
 
   Future<void> _clone() async {
     setState(() => _cloning = true);
@@ -33,73 +54,28 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
     }
   }
 
-  Future<void> _reloadProjectFile() async {
-    try {
-      await ref.read(apiClientProvider).reloadProject(widget.project.name);
-      await ref.read(workspaceStateProvider.notifier).refresh();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${widget.project.name}: limousine.proj reloaded')),
-      );
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      _showReloadBlockedDialog(e);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reload failed: $e')),
-      );
-    }
+  Future<void> _refresh() async {
+    await ref.read(gitStatusProvider.notifier).refresh(widget.project.name);
   }
 
-  void _showReloadBlockedDialog(ApiException e) {
-    List<String> running = const [];
-    String message = e.message;
-    try {
-      final body = jsonDecode(e.message) as Map<String, dynamic>;
-      message = (body['error'] as String?) ?? message;
-      final list = body['runningServices'];
-      if (list is List) {
-        running = list.map((s) => (s as Map)['id'].toString()).toList();
-      }
-    } catch (_) {}
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reload blocked'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(message),
-              if (running.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                const Text('Running services:',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                const SizedBox(height: 4),
-                ...running.map((id) => Text('  • $id',
-                    style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 12))),
-              ],
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _pull() async {
+    final result =
+        await ref.read(gitStatusProvider.notifier).pull(widget.project.name);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+          '${widget.project.name}: ${result.ok ? "pulled" : "pull failed"} — ${result.message}'),
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     final project = widget.project;
     final canClone = !project.existsOnDisk && project.gitRepoUrl != null;
+    final gitStatus = ref.watch(gitStatusProvider
+        .select((b) => b.byProject[project.name]));
+    final gitBusy = ref.watch(
+        gitStatusProvider.select((b) => b.inFlight.contains(project.name)));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -117,45 +93,24 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
                   : Colors.orange,
         ),
         title: Text(project.name),
-        subtitle: Text(
-          project.resolvedPath,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (canClone) _cloneButton(),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, size: 20),
-              tooltip: 'Project actions',
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'reload',
-                  child: ListTile(
-                    leading: Icon(Icons.refresh, size: 18),
-                    title: Text('Reload project file'),
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                  ),
-                ),
-                if (project.projectData?.agentGuide != null)
-                  const PopupMenuItem(
-                    value: 'agent-guide',
-                    child: ListTile(
-                      leading: Icon(Icons.info_outline, size: 18),
-                      title: Text('Show agent guide'),
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                    ),
-                  ),
-              ],
-              onSelected: (v) {
-                if (v == 'reload') _reloadProjectFile();
-                if (v == 'agent-guide') _showGuide(context);
-              },
+            Text(
+              project.resolvedPath,
+              style: Theme.of(context).textTheme.bodySmall,
             ),
+            if (project.existsOnDisk && gitStatus != null) ...[
+              const SizedBox(height: 4),
+              _GitLine(status: gitStatus),
+            ],
           ],
         ),
+        trailing: canClone
+            ? _cloneButton()
+            : (project.existsOnDisk
+                ? _onDiskActions(gitStatus, gitBusy)
+                : null),
         children: [
           if (!project.existsOnDisk)
             Padding(
@@ -228,24 +183,205 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
     );
   }
 
-  void _showGuide(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('${widget.project.name} — Agent Guide'),
-        content: SizedBox(
-          width: 500,
-          child: SelectableText(
-            widget.project.projectData!.agentGuide!,
-            style: const TextStyle(fontSize: 13, height: 1.5),
+  Widget _onDiskActions(GitStatusDto? status, bool busy) {
+    // Lock files don't block pull — server auto-stashes them.
+    final canPull = status != null &&
+        status.behindUpstream != null &&
+        status.behindUpstream! > 0 &&
+        (status.aheadUpstream ?? 0) == 0 &&
+        status.dirtyCode == 0;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Check for updates (git fetch)',
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          iconSize: 18,
+          icon: busy
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.cloud_sync),
+          onPressed: busy ? null : _refresh,
+        ),
+        IconButton(
+          tooltip: canPull
+              ? 'git pull --ff-only'
+              : (status == null
+                  ? 'loading…'
+                  : 'pull: branch is ahead, dirty, or already up to date'),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          iconSize: 18,
+          icon: const Icon(Icons.south),
+          onPressed: (busy || !canPull) ? null : _pull,
+        ),
+      ],
+    );
+  }
+}
+
+class _GitLine extends StatelessWidget {
+  final GitStatusDto status;
+  const _GitLine({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    if (status.error != null) {
+      return Text(
+        'git: ${status.error}',
+        style: const TextStyle(fontSize: 11, color: Color(0xFFF43F5E)),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return Row(
+      children: [
+        Text(
+          status.branch ?? '?',
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 12,
+            color: Color(0xFF22D3EE),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+        if (status.shortSha != null) ...[
+          const SizedBox(width: 6),
+          Text(
+            status.shortSha!,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              color: Color(0xFF94A3B8),
+            ),
           ),
         ],
+        const SizedBox(width: 10),
+        Expanded(child: _Chips(status: status)),
+        if (status.lastFetched != null)
+          Text(
+            'fetched ${_relative(status.lastFetched!)}',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+          ),
+      ],
+    );
+  }
+
+  static String _relative(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 48) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+}
+
+class _Chips extends StatelessWidget {
+  final GitStatusDto status;
+  const _Chips({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[];
+
+    if (status.dirty > 0) {
+      final lock = status.dirtyLock;
+      final code = status.dirtyCode;
+      final label = (lock > 0 && code > 0)
+          ? '${status.dirty} dirty ($lock lock)'
+          : lock > 0
+              ? '$lock dirty (lock)'
+              : '$code dirty';
+      chips.add(_Chip(
+        label: label,
+        color: const Color(0xFFEAB308),
+        tooltip:
+            'Uncommitted changes in the working tree. Tap for details and commands.',
+        onTap: () => showDirtyDialog(context, status),
+      ));
+    }
+
+    if (status.behindUpstream != null && status.behindUpstream! > 0) {
+      chips.add(_Chip(
+        label: '↓${status.behindUpstream} upstream',
+        color: const Color(0xFF22C55E),
+        tooltip: 'Commits on the remote branch you don\'t have yet. '
+            'Pull to apply.',
+        onTap: () => showBehindUpstreamDialog(context, status),
+      ));
+    }
+
+    if (status.aheadUpstream != null && status.aheadUpstream! > 0) {
+      chips.add(_Chip(
+        label: '↑${status.aheadUpstream} upstream',
+        color: const Color(0xFF22D3EE),
+        tooltip: 'Local commits not yet pushed to the remote.',
+        onTap: () => showAheadUpstreamDialog(context, status),
+      ));
+    }
+
+    if (status.upstream == null) {
+      chips.add(_Chip(
+        label: 'no upstream',
+        color: const Color(0xFF94A3B8),
+        tooltip:
+            'Branch isn\'t tracking a remote — push with -u to set one up.',
+        onTap: () => showNoUpstreamDialog(context, status),
+      ));
+    }
+
+    if (status.behindMain != null && status.behindMain! > 0) {
+      chips.add(_Chip(
+        label: '↓${status.behindMain} ${status.mainBranch ?? "main"}',
+        color: const Color(0xFFF43F5E),
+        tooltip:
+            'Commits on ${status.mainBranch ?? "main"} that aren\'t on this branch. '
+            'A rebase or merge may be needed.',
+        onTap: () => showBehindMainDialog(context, status),
+      ));
+    }
+
+    return Wrap(spacing: 6, runSpacing: 4, children: chips);
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _Chip({
+    required this.label,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 350),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            border:
+                Border.all(color: color.withValues(alpha: 0.5), width: 1),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            label,
+            style:
+                TextStyle(fontSize: 11, color: color, fontFamily: 'monospace'),
+          ),
+        ),
       ),
     );
   }

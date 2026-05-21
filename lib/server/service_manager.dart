@@ -88,7 +88,7 @@ class ServiceManager {
 
     final env = await Env.buildBaseEnv();
     // Forward the age private key into the child so its in-command `sops
-    // exec-env …` invocation can decrypt the per-project .env.secrets file.
+    // exec-env …` invocation can decrypt the per-project secrets.env file.
     // The child (and any subprocess it spawns) will see SOPS_AGE_KEY in its
     // environment — same trust model as forwarding SSH_AUTH_SOCK.
     final ageKey = secretStore.privateKey;

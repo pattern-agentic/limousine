@@ -26,8 +26,23 @@ class Project {
     return Project(
       modules: modules,
       visibleTabs: List<String>.from(json['visible-tabs'] ?? []),
-      agentGuide: json['agent-guide'],
+      agentGuide: _parseAgentGuide(json['agent-guide']),
     );
+  }
+
+  /// `agent-guide` accepts either a single string or a list of paragraph
+  /// strings. JSON has no native multiline string syntax, so the list form
+  /// lets humans format guides as readable paragraphs in the source file.
+  /// Paragraphs are joined with a blank line so the rendered dialog (uses
+  /// SelectableText with default line wrap) reads naturally.
+  static String? _parseAgentGuide(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is String) return raw;
+    if (raw is List) {
+      return raw.whereType<String>().join('\n\n');
+    }
+    _log.warning('Unexpected agent-guide type: ${raw.runtimeType}');
+    return null;
   }
 
   Map<String, dynamic> toJson() => {
@@ -62,10 +77,20 @@ class Module {
     if (servicesRaw is Map<String, dynamic>) {
       services = servicesRaw.map((k, v) => MapEntry(k, Service.fromJson(k, v)));
     }
+    // Distinguish "no `config:` block declared" from "declared but empty".
+    // Modules that don't opt into limousine's env model (e.g. studio-frontend
+    // which uses Vite's native env loading) should not trigger drift
+    // warnings just because we'd default `source-env-file` to `.env.example`
+    // and find one sitting in the project root.
+    final configJson = json['config'];
+    final declared = configJson is Map<String, dynamic>;
     return Module(
       name: name,
       services: services,
-      config: ModuleConfig.fromJson(json['config'] ?? {}),
+      config: ModuleConfig.fromJson(
+        declared ? configJson : const <String, dynamic>{},
+        declared: declared,
+      ),
     );
   }
 
@@ -105,20 +130,26 @@ class ModuleConfig {
   final String activeSecretsEnvFile;
   final String sourceEnvFile;
   final String sourceSecretsFile;
+  /// True when the module's limousine.proj declared a `config:` block.
+  /// Drift detection (env + secrets) is skipped when this is false — the
+  /// module hasn't opted into limousine's env management.
+  final bool declared;
 
   ModuleConfig({
     this.activeEnvFile = '.env',
-    this.activeSecretsEnvFile = '.env.secrets',
+    this.activeSecretsEnvFile = 'secrets.env',
     this.sourceEnvFile = '.env.example',
-    this.sourceSecretsFile = '.env.secrets.example',
+    this.sourceSecretsFile = 'secrets.env.example',
+    this.declared = false,
   });
 
-  factory ModuleConfig.fromJson(Map<String, dynamic> json) {
+  factory ModuleConfig.fromJson(Map<String, dynamic> json, {bool declared = false}) {
     return ModuleConfig(
+      declared: declared,
       activeEnvFile: json['active-env-file'] ?? '.env',
-      activeSecretsEnvFile: json['active-secrets-env-file'] ?? '.env.secrets',
+      activeSecretsEnvFile: json['active-secrets-env-file'] ?? 'secrets.env',
       sourceEnvFile: json['source-env-file'] ?? '.env.example',
-      sourceSecretsFile: json['source-secrets-file'] ?? '.env.secrets.example',
+      sourceSecretsFile: json['source-secrets-file'] ?? 'secrets.env.example',
     );
   }
 

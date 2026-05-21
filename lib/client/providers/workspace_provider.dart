@@ -77,6 +77,24 @@ class CollapsedModulesNotifier extends Notifier<Set<String>> {
   }
 }
 
+/// Same per-session model as collapsedModules, but for project groups in the
+/// sidebar. Resets on reload, not persisted to the .wksp.
+final collapsedProjectsProvider =
+    NotifierProvider<CollapsedProjectsNotifier, Set<String>>(
+  CollapsedProjectsNotifier.new,
+);
+
+class CollapsedProjectsNotifier extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => const {};
+
+  void toggle(String name) {
+    final next = Set<String>.from(state);
+    if (!next.add(name)) next.remove(name);
+    state = next;
+  }
+}
+
 final globalConfigProvider = FutureProvider<GlobalConfig>((ref) async {
   return ref.watch(apiClientProvider).getGlobalConfig();
 });

@@ -12,6 +12,7 @@ import '../core/dto.dart';
 import 'env.dart';
 import 'git.dart';
 import 'mcp.dart';
+import 'project_status.dart';
 import 'secret_store.dart';
 import 'service_manager.dart';
 import 'storage.dart';
@@ -164,6 +165,34 @@ Router buildApiRouter(
     }
     await wsm.reloadProjects();
     return _json({'ok': true, 'stdout': result.stdout, 'stderr': result.stderr});
+  });
+
+  router.get('/api/git/projects/<name>/status', (Request _, String name) async {
+    final loaded = wsm.projects[name];
+    if (loaded == null) return _error('Project not found: $name', status: 404);
+    final dto = await Git.status(name, loaded.resolvedPath);
+    return _json((await ProjectStatus.withConfigDeltas(dto, loaded)).toJson());
+  });
+
+  router.post('/api/git/projects/<name>/refresh', (Request _, String name) async {
+    final loaded = wsm.projects[name];
+    if (loaded == null) return _error('Project not found: $name', status: 404);
+    final dto = await Git.refresh(name, loaded.resolvedPath);
+    return _json((await ProjectStatus.withConfigDeltas(dto, loaded)).toJson());
+  });
+
+  router.post('/api/git/projects/<name>/pull', (Request _, String name) async {
+    final loaded = wsm.projects[name];
+    if (loaded == null) return _error('Project not found: $name', status: 404);
+    final result = await Git.pullFfOnly(name, loaded.resolvedPath);
+    // Pull may have updated source files (env.example, secrets.env.example).
+    // Recompute deltas against the post-pull tree before responding.
+    final withDeltas = await ProjectStatus.withConfigDeltas(result.status, loaded);
+    return _json({
+      'ok': result.success,
+      'message': result.message,
+      'status': withDeltas.toJson(),
+    }, status: result.success ? 200 : 409);
   });
 
   router.post('/api/projects/<name>/reload', (Request _, String name) async {
@@ -556,3 +585,5 @@ Handler staticFallback(Handler primary, Handler fallback) {
 
 bool isLoopback(InternetAddress addr) =>
     addr.isLoopback || addr.address == '127.0.0.1' || addr.address == '::1';
+
+

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
+import '../core/dto.dart';
 
 final _log = Logger('Git');
 
@@ -118,4 +119,274 @@ class Git {
       result.exitCode,
     );
   }
+
+  // ─── status / refresh / pull ────────────────────────────────────────────
+  // All of these shell out to the same `git` binary the rest of this class
+  // uses. status() is local-only (no network). refresh() runs `git fetch`.
+  // pullFfOnly() runs `git pull --ff-only` after a sanity check.
+
+  /// Run `git <args>` in [cwd], return ProcessResult. Captures stderr for
+  /// diagnostics; doesn't log unless the exit code is non-zero. Times out
+  /// after 30s so a wedged ssh-agent prompt can't hang the server.
+  static Future<ProcessResult> _run(
+    List<String> args,
+    String cwd, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    // BatchMode + ConnectTimeout: same hardening as clone() — never prompt
+    // the terminal for credentials, return a real error fast.
+    const sshOpts =
+        '-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new';
+    return Process.run(
+      'git',
+      ['-c', 'core.askpass=', '-c', 'core.sshCommand=ssh $sshOpts', ...args],
+      workingDirectory: cwd,
+      environment: {
+        'GIT_TERMINAL_PROMPT': '0',
+        'SSH_ASKPASS': '/bin/false',
+        'SSH_ASKPASS_REQUIRE': 'never',
+      },
+      includeParentEnvironment: true,
+    ).timeout(timeout);
+  }
+
+  /// Compute a [GitStatusDto] for the repo at [projectPath] without any
+  /// network calls. Safe to invoke from the hot path of the dashboard load.
+  static Future<GitStatusDto> status(String projectName, String projectPath) async {
+    final dir = Directory(projectPath);
+    final gitDir = Directory(p.join(projectPath, '.git'));
+    if (!await dir.exists() || !await gitDir.exists()) {
+      return GitStatusDto(project: projectName, exists: false);
+    }
+
+    try {
+      // Branch (or "HEAD" for detached).
+      final branchRes = await _run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
+      final branch = branchRes.exitCode == 0
+          ? (branchRes.stdout as String).trim()
+          : null;
+
+      // Short SHA + last commit subject.
+      final shaRes = await _run(['rev-parse', '--short', 'HEAD'], projectPath);
+      final shortSha = shaRes.exitCode == 0 ? (shaRes.stdout as String).trim() : null;
+
+      final subjRes = await _run(['log', '-1', '--format=%s', 'HEAD'], projectPath);
+      final subject = subjRes.exitCode == 0 ? (subjRes.stdout as String).trim() : null;
+
+      // Dirty files. Parse porcelain output: first two chars are status
+      // (e.g. " M", "??", "MM"), then a space, then the path.
+      final dirtyRes = await _run(['status', '--porcelain'], projectPath);
+      final dirtyFiles = <DirtyFileDto>[];
+      if (dirtyRes.exitCode == 0) {
+        for (final line in (dirtyRes.stdout as String).split('\n')) {
+          if (line.length < 4) continue;
+          final code = line.substring(0, 2);
+          final path = line.substring(3);
+          dirtyFiles.add(DirtyFileDto(
+            path: path,
+            status: code,
+            isLockFile: _isLockFile(path),
+          ));
+        }
+      }
+
+      // Upstream + behind/ahead vs upstream (local refs only).
+      final upstreamRes =
+          await _run(['rev-parse', '--abbrev-ref', '@{upstream}'], projectPath);
+      String? upstream;
+      int? behindUpstream;
+      int? aheadUpstream;
+      if (upstreamRes.exitCode == 0) {
+        upstream = (upstreamRes.stdout as String).trim();
+        final countsRes = await _run(
+          ['rev-list', '--left-right', '--count', '$upstream...HEAD'],
+          projectPath,
+        );
+        if (countsRes.exitCode == 0) {
+          final parts = (countsRes.stdout as String).trim().split(RegExp(r'\s+'));
+          if (parts.length == 2) {
+            behindUpstream = int.tryParse(parts[0]);
+            aheadUpstream = int.tryParse(parts[1]);
+          }
+        }
+      }
+
+      // Resolve default branch — `origin/HEAD` if set, fall back to main/master.
+      final mainBranch = await _resolveMainBranch(projectPath);
+
+      // Commits behind main (only when current branch isn't main).
+      int? behindMain;
+      if (mainBranch != null && branch != mainBranch) {
+        final mainRefRes =
+            await _run(['rev-list', '--count', 'HEAD..origin/$mainBranch'], projectPath);
+        if (mainRefRes.exitCode == 0) {
+          behindMain = int.tryParse((mainRefRes.stdout as String).trim());
+        }
+      }
+
+      // FETCH_HEAD mtime as proxy for "last fetched".
+      DateTime? lastFetched;
+      final fetchHead = File(p.join(projectPath, '.git', 'FETCH_HEAD'));
+      if (await fetchHead.exists()) {
+        lastFetched = (await fetchHead.stat()).modified;
+      }
+
+      return GitStatusDto(
+        project: projectName,
+        exists: true,
+        branch: branch,
+        shortSha: shortSha,
+        subject: subject,
+        dirtyFiles: dirtyFiles,
+        upstream: upstream,
+        behindUpstream: behindUpstream,
+        aheadUpstream: aheadUpstream,
+        mainBranch: mainBranch,
+        behindMain: behindMain,
+        lastFetched: lastFetched,
+      );
+    } catch (e, st) {
+      _log.warning('git status failed for $projectName at $projectPath', e, st);
+      return GitStatusDto(
+        project: projectName,
+        exists: true,
+        error: e.toString(),
+      );
+    }
+  }
+
+  /// `git fetch --prune --quiet origin` then return fresh status. Network op.
+  static Future<GitStatusDto> refresh(String projectName, String projectPath) async {
+    final dir = Directory(projectPath);
+    if (!await dir.exists()) {
+      return GitStatusDto(project: projectName, exists: false);
+    }
+    final fetchRes = await _run(['fetch', '--prune', '--quiet', 'origin'], projectPath);
+    if (fetchRes.exitCode != 0) {
+      _log.warning(
+        'git fetch failed for $projectName: ${(fetchRes.stderr as String).trim()}',
+      );
+    }
+    return status(projectName, projectPath);
+  }
+
+  /// `git pull --ff-only` with lock-file auto-stash. Pre-flight: refuses if
+  /// any non-lock files are dirty (caller should gate the button anyway).
+  /// When lock files are dirty, stashes just those paths, pulls, then pops.
+  /// If pop conflicts (rare — only when remote also modified those exact
+  /// lines), the stash is left in place and the failure is surfaced.
+  static Future<GitPullResult> pullFfOnly(
+    String projectName,
+    String projectPath,
+  ) async {
+    final dir = Directory(projectPath);
+    if (!await dir.exists()) {
+      return GitPullResult(
+        success: false,
+        message: 'project directory missing',
+        status: GitStatusDto(project: projectName, exists: false),
+      );
+    }
+
+    final pre = await Git.status(projectName, projectPath);
+    if (pre.dirtyCode > 0) {
+      return GitPullResult(
+        success: false,
+        message:
+            'refused: ${pre.dirtyCode} code file(s) dirty. Commit or stash them first.',
+        status: pre,
+      );
+    }
+
+    var stashed = false;
+    if (pre.dirtyLock > 0) {
+      final lockPaths = pre.lockFiles.map((f) => f.path).toList();
+      final stashRes = await _run(
+        ['stash', 'push', '--quiet', '-m', 'limousine: auto-stash lock files', '--', ...lockPaths],
+        projectPath,
+      );
+      if (stashRes.exitCode != 0) {
+        final err = (stashRes.stderr as String).trim();
+        return GitPullResult(
+          success: false,
+          message: 'failed to stash lock files: $err',
+          status: await Git.status(projectName, projectPath),
+        );
+      }
+      stashed = true;
+    }
+
+    final pullRes = await _run(['pull', '--ff-only', '--quiet'], projectPath);
+    final pullStderr = (pullRes.stderr as String).trim();
+    final pullOk = pullRes.exitCode == 0;
+
+    String popMessage = '';
+    if (stashed) {
+      final popRes = await _run(['stash', 'pop', '--quiet'], projectPath);
+      if (popRes.exitCode != 0) {
+        final popErr = (popRes.stderr as String).trim();
+        // Pop failed → stash still in place. Tell the user.
+        popMessage =
+            ' Lock-file stash kept (conflict on pop) — run `git stash list` then resolve manually. ${popErr.isEmpty ? '' : popErr}';
+      } else if (pullOk) {
+        popMessage = ' Auto-stashed and restored lock files.';
+      }
+    }
+
+    final status = await Git.status(projectName, projectPath);
+    return GitPullResult(
+      success: pullOk && (stashed ? !popMessage.contains('conflict') : true),
+      message: pullOk
+          ? 'fast-forwarded.$popMessage'
+          : (pullStderr.isEmpty ? 'pull failed' : pullStderr),
+      status: status,
+    );
+  }
+
+  /// Lock files: basename-matched. Same set across ecosystems.
+  static const _lockFileNames = {
+    'uv.lock',
+    'package-lock.json',
+    'yarn.lock',
+    'pnpm-lock.yaml',
+    'Cargo.lock',
+    'Pipfile.lock',
+    'poetry.lock',
+    'composer.lock',
+    'Gemfile.lock',
+  };
+
+  static bool _isLockFile(String path) {
+    final base = path.split('/').last;
+    return _lockFileNames.contains(base);
+  }
+
+  static Future<String?> _resolveMainBranch(String projectPath) async {
+    final symRes = await _run(
+      ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+      projectPath,
+    );
+    if (symRes.exitCode == 0) {
+      final v = (symRes.stdout as String).trim();
+      // Returns "origin/main" — strip the "origin/" prefix.
+      if (v.startsWith('origin/')) return v.substring('origin/'.length);
+      return v;
+    }
+    // Fallbacks if origin/HEAD isn't set locally.
+    for (final candidate in ['main', 'master']) {
+      final r = await _run(
+        ['show-ref', '--verify', '--quiet', 'refs/remotes/origin/$candidate'],
+        projectPath,
+      );
+      if (r.exitCode == 0) return candidate;
+    }
+    return null;
+  }
+}
+
+class GitPullResult {
+  final bool success;
+  final String message;
+  final GitStatusDto status;
+  GitPullResult({required this.success, required this.message, required this.status});
 }

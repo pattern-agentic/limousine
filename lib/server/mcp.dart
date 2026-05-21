@@ -4,6 +4,7 @@ import 'package:logging/logging.dart' as logging;
 import 'package:mcp_dart/mcp_dart.dart';
 import '../core/dto.dart';
 import '../core/workspace.dart';
+import 'project_status.dart';
 import 'service_manager.dart';
 import 'workspace_manager.dart';
 
@@ -246,6 +247,122 @@ class McpManager {
         return CallToolResult(
           content: [TextContent(text: const JsonEncoder.withIndent('  ').convert(result))],
         );
+      },
+    );
+
+    server.registerTool(
+      'get_git_status',
+      description:
+          'Get a git + config-state snapshot for every project in the open '
+          'workspace (or one project if `projectName` is provided). Reports: '
+          'whether the project is cloned, current branch + commit, dirty '
+          'files split into code vs lockfile counts, behind/ahead of upstream, '
+          'behind the project\'s main branch, and per-module env/secrets '
+          'drift (keys missing or extra in the dev\'s active files vs the '
+          'committed template). Local-only — does not run `git fetch`. Call '
+          '`git_fetch` first if you need fresh upstream comparisons.',
+      inputSchema: ToolInputSchema(
+        properties: {
+          'projectName': JsonSchema.string(
+              description:
+                  'Project name. Omit to get status for every project.'),
+        },
+      ),
+      callback: (args, extra) async {
+        final filter = args['projectName'] as String?;
+        try {
+          final all = await ProjectStatus.readAll(workspaceManager);
+          final filtered = filter == null
+              ? all
+              : all.where((m) => m['name'] == filter).toList();
+          if (filter != null && filtered.isEmpty) {
+            return CallToolResult(
+              content: [TextContent(text: 'Project not found: $filter')],
+              isError: true,
+            );
+          }
+          return CallToolResult(
+            content: [
+              TextContent(
+                  text: const JsonEncoder.withIndent('  ').convert(filtered)),
+            ],
+          );
+        } catch (e) {
+          return CallToolResult(
+            content: [TextContent(text: 'Failed to read git status: $e')],
+            isError: true,
+          );
+        }
+      },
+    );
+
+    server.registerTool(
+      'git_fetch',
+      description:
+          'Run `git fetch --prune` on one project (`projectName`) or every '
+          'cloned project (no arg). Updates the upstream comparison; does '
+          'not touch the working tree. Returns the refreshed status snapshot '
+          'in the same shape as `get_git_status`.',
+      inputSchema: ToolInputSchema(
+        properties: {
+          'projectName': JsonSchema.string(
+              description:
+                  'Project name. Omit to fetch every cloned project in parallel.'),
+        },
+      ),
+      callback: (args, extra) async {
+        final filter = args['projectName'] as String?;
+        try {
+          if (filter != null) {
+            final loaded = workspaceManager.projects[filter];
+            if (loaded == null) {
+              return CallToolResult(
+                content: [TextContent(text: 'Project not found: $filter')],
+                isError: true,
+              );
+            }
+            if (!loaded.existsOnDisk) {
+              return CallToolResult(
+                content: [
+                  TextContent(text: 'Project $filter is not cloned; nothing to fetch'),
+                ],
+                isError: true,
+              );
+            }
+            final dto = await ProjectStatus.refresh(filter, loaded);
+            return CallToolResult(
+              content: [
+                TextContent(
+                  text: const JsonEncoder.withIndent('  ')
+                      .convert(ProjectStatus.toAgentSummary(dto, loaded)),
+                ),
+              ],
+            );
+          }
+          // Fan-out fetch for every cloned project.
+          final cloned = workspaceManager.projects.entries
+              .where((e) => e.value.existsOnDisk)
+              .toList();
+          final results = await Future.wait(cloned.map((e) async {
+            try {
+              final dto = await ProjectStatus.refresh(e.key, e.value);
+              return ProjectStatus.toAgentSummary(dto, e.value);
+            } catch (err) {
+              return {'name': e.key, 'error': err.toString()};
+            }
+          }));
+          return CallToolResult(
+            content: [
+              TextContent(
+                  text: const JsonEncoder.withIndent('  ').convert(results)),
+            ],
+          );
+        } catch (e) {
+          return CallToolResult(
+            content: [TextContent(text: 'git fetch failed: $e')],
+            isError: true,
+          );
+        }
       },
     );
   }

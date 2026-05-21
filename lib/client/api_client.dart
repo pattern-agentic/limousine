@@ -164,6 +164,31 @@ class ApiClient {
   Future<void> cloneProject(String projectName) =>
       _post('/api/projects/$projectName/clone');
 
+  Future<GitStatusDto> getGitStatus(String projectName) async =>
+      GitStatusDto.fromJson(await _get('/api/git/projects/$projectName/status'));
+
+  Future<GitStatusDto> refreshGitStatus(String projectName) async {
+    final r = await _http.post(
+      _u('/api/git/projects/$projectName/refresh'),
+      headers: const {'content-type': 'application/json'},
+      body: '{}',
+    );
+    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.body);
+    return GitStatusDto.fromJson(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  Future<GitPullResultDto> gitPull(String projectName) async {
+    final r = await _http.post(
+      _u('/api/git/projects/$projectName/pull'),
+      headers: const {'content-type': 'application/json'},
+      body: '{}',
+    );
+    // 409 = pull failed (non-ff or other). Body still contains status, surface it.
+    if (r.statusCode >= 500) throw ApiException(r.statusCode, r.body);
+    final body = jsonDecode(r.body) as Map<String, dynamic>;
+    return GitPullResultDto.fromJson(body);
+  }
+
   /// Reload one project's `limousine.proj`. Throws [ApiException] with a JSON
   /// body listing running services on 409.
   Future<void> reloadProject(String projectName) =>

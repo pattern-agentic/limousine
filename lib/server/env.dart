@@ -38,7 +38,7 @@ class Env {
   /// PATH/TERM tweaks. Deliberately does NOT load `active-env-file` or
   /// `active-secrets-env-file` — each project's start command is responsible
   /// for its own env loading (typically `dotenv -f env.dev.meta run -- sops
-  /// exec-env .env.secrets -- <real cmd>`). The fields in limousine.proj's
+  /// exec-env secrets.env '...real cmd...'`). The fields in limousine.proj's
   /// config block are now pure metadata for the editor.
   static Future<Map<String, String>> buildBaseEnv() async {
     final env = Map<String, String>.from(Platform.environment);

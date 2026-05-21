@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/dto.dart';
 import '../../../providers/services_provider.dart';
 import '../../../providers/workspace_provider.dart';
-import '../dialogs/env_editor.dart';
-import '../dialogs/secrets_editor.dart';
 
 class ControlBar extends ConsumerStatefulWidget {
   final ClientServiceInfo service;
@@ -57,8 +55,6 @@ class _ControlBarState extends ConsumerState<ControlBar> {
             const SizedBox(width: 8),
           ],
           _mainButton(status, state),
-          const SizedBox(width: 8),
-          _envMenu(),
         ],
       ),
     );
@@ -163,7 +159,11 @@ class _ControlBarState extends ConsumerState<ControlBar> {
         underline: const SizedBox.shrink(),
         icon: Icon(Icons.arrow_drop_down,
             size: 18, color: Colors.white.withOpacity(0.7)),
-        style: const TextStyle(fontSize: 12),
+        // textTheme.apply(bodyColor/displayColor) doesn't cover titleMedium,
+        // which is what DropdownButton uses by default for its items —
+        // without an explicit color we get black-on-dark in the popup.
+        style: const TextStyle(fontSize: 12, color: Color(0xFFE5E7EB)),
+        dropdownColor: const Color(0xFF0B1120),
         items: commands.keys
             .map((name) => DropdownMenuItem(value: name, child: Text(name)))
             .toList(),
@@ -173,24 +173,4 @@ class _ControlBarState extends ConsumerState<ControlBar> {
     );
   }
 
-  Widget _envMenu() {
-    return PopupMenuButton<String>(
-      icon: Icon(Icons.more_vert, size: 18, color: Colors.white.withOpacity(0.7)),
-      tooltip: 'More',
-      itemBuilder: (_) => [
-        const PopupMenuItem(value: 'env', child: Text('Environment variables…')),
-        const PopupMenuItem(value: 'secrets', child: Text('Secrets…')),
-      ],
-      onSelected: (v) {
-        if (v == 'env') {
-          EnvEditorOpener.openEnv(context, ref, widget.service.id);
-        } else if (v == 'secrets') {
-          showDialog(
-            context: context,
-            builder: (_) => SecretsEditorDialog(serviceId: widget.service.id),
-          );
-        }
-      },
-    );
-  }
 }

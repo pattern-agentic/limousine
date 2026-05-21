@@ -37,7 +37,7 @@ class SecretStoreLockedException implements Exception {
 /// All encryption / decryption is delegated to the `sops` CLI — see
 /// docker/Dockerfile for the pinned versions. Limousine does NOT inject
 /// secrets into spawned services anymore; instead the start command in each
-/// project's limousine.proj does `sops exec-env .env.secrets -- …` itself.
+/// project's limousine.proj does `sops exec-env secrets.env '<cmd>'` itself.
 /// This module's runtime responsibilities are:
 ///   - validate the key on startup against a `secret-store-stamp` (sops-encrypted)
 ///   - serve the secrets editor UI (decrypt for view, encrypt on save)
@@ -135,7 +135,7 @@ class SecretStore {
         'SECRET-STORE STAMP MISMATCH for ${p.basename(workspacePath)}. '
         'The supplied age key does not decrypt the existing stamp. Restart '
         'with the correct key, or delete $stampPath plus any encrypted '
-        '.env.secrets files to start fresh.',
+        'secrets.env files to start fresh.',
       );
     }
   }

@@ -113,8 +113,17 @@ ARGS=(--rm)
 [ -t 0 ] && ARGS+=(-it) || ARGS+=(-i)
 
 ARGS+=(--name "limousine-${PORT}")
-# Bind both the main port and the MCP port to BIND_HOST explicitly.
-ARGS+=(-p "${BIND_HOST}:${PORT}:${PORT}" -p "${BIND_HOST}:${MCP_PORT}:${MCP_PORT}")
+# Host networking: the container shares the host's network namespace, so
+# `127.0.0.1:PORT` inside the container reaches services published on the
+# host (postgres on 5432, nats on 4222, redis on 6379, …). Without this,
+# every spawned service would need to use `host.docker.internal` or the
+# real LAN IP, which would break standalone command replication on the
+# host. NOTE: on macOS, host networking requires Docker Desktop's
+# Settings → Resources → Network → "Enable host networking" toggle.
+ARGS+=(--network host)
+# Port-publishing is irrelevant with --network host (docker prints a
+# warning if you set -p). The host-side bind is enforced by the
+# limousine server's own --host argument below.
 
 ARGS+=(--user "$(id -u):$(id -g)")
 
@@ -135,6 +144,19 @@ fi
 [ -d "$HOME/.ssh"           ] && ARGS+=(-v "$HOME/.ssh:$HOME/.ssh:ro")
 [ -d "$HOME/.docker"        ] && ARGS+=(-v "$HOME/.docker:$HOME/.docker:ro")
 [ -f "$HOME/.gitconfig"     ] && ARGS+=(-v "$HOME/.gitconfig:$HOME/.gitconfig:ro")
+# Tool state — uv, pip, npm, pipx and similar dev tools write under $HOME.
+# Docker creates the parent of bind-mounts as root-owned, so without explicit
+# mounts tools running as the host uid can't create subdirs:
+#   uv  → ~/.cache/uv (cache), ~/.local/share/uv (managed pythons), ~/.local/bin (installed CLIs)
+#   pip → ~/.cache/pip
+#   npm → ~/.npm
+# Mount the standard XDG cache+data dirs plus ~/.npm. Pre-create on the host
+# so docker doesn't silently make root-owned host directories if they're
+# missing.
+mkdir -p "$HOME/.cache" "$HOME/.local" "$HOME/.npm" 2>/dev/null
+[ -d "$HOME/.cache"         ] && ARGS+=(-v "$HOME/.cache:$HOME/.cache")
+[ -d "$HOME/.local"         ] && ARGS+=(-v "$HOME/.local:$HOME/.local")
+[ -d "$HOME/.npm"           ] && ARGS+=(-v "$HOME/.npm:$HOME/.npm")
 
 # SSH agent forwarding. The mechanism differs by host OS:
 #   Linux  → bind-mount the host's actual socket. Sockets traverse the bind.
@@ -173,7 +195,7 @@ ARGS+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
 ARGS+=(-e "LIMOUSINE_AGE_KEY=${LIMOUSINE_AGE_KEY:-}")
 
 # -- Server CLI args --------------------------------------------------------
-SERVER_ARGS=(--host 0.0.0.0 --port "$PORT")   # inside-container always 0.0.0.0; host-side binding is enforced via -p
+SERVER_ARGS=(--host "$BIND_HOST" --port "$PORT")   # with --network host, this binds directly on the host interface
 [ -n "$WORKSPACE_ABS" ] && SERVER_ARGS+=(--workspace "$WORKSPACE_ABS")
 [ -n "$CLONE_ROOT_ABS" ] && SERVER_ARGS+=(--clone-root "$CLONE_ROOT_ABS")
 
@@ -184,5 +206,10 @@ echo "  mounting ${MOUNT_ROOT}"
 [ -n "$WORKSPACE_ABS" ] && echo "  workspace ${WORKSPACE_ABS}"
 [ -n "$CLONE_ROOT_ABS" ] && echo "  clone root ${CLONE_ROOT_ABS}"
 [ -z "${LIMOUSINE_AGE_KEY:-}" ] && echo "  secret store: locked (no age key supplied)"
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "  macOS: requires Docker Desktop ≥ 4.34 with Settings → Resources →"
+  echo "         Network → 'Enable host networking' toggled ON. If the UI"
+  echo "         isn't reachable at the URL above, that toggle is the cause."
+fi
 
 exec docker run "${ARGS[@]}" "$IMAGE" "${SERVER_ARGS[@]}"
