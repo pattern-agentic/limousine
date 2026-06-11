@@ -128,6 +128,15 @@ RUN install -d -m 0755 /etc/ssh \
     && echo "Baked host keys for github.com:" \
     && cut -d ' ' -f 1,2 /etc/ssh/ssh_known_hosts
 
+# Stub credential helpers so docker CLI can satisfy `credsStore: desktop`
+# from a macOS host's ~/.docker/config.json (mounted into the container).
+# Without these, the very first `docker run <public-image>` from inside the
+# container fails before even trying the pull. See the script for details.
+COPY docker/docker-credential-shim.sh /usr/local/bin/docker-credential-desktop
+RUN chmod +x /usr/local/bin/docker-credential-desktop \
+    && ln -sf docker-credential-desktop /usr/local/bin/docker-credential-desktop-store \
+    && ln -sf docker-credential-desktop /usr/local/bin/docker-credential-osxkeychain
+
 # Pre-built limousine artifacts copied straight from the host build tree.
 # Run `make local-build` first.
 COPY build/bin/limousine-server      /opt/limousine/limousine-server

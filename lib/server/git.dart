@@ -224,6 +224,35 @@ class Git {
         }
       }
 
+      // Most recent tag reachable from origin/<main>, plus the number of
+      // commits between that tag and HEAD. Matches `git describe HEAD`
+      // semantics — "how far past the last release am I" — so on a feature
+      // branch with 2 unmerged commits the dashboard shows `v1.31.1 +2`.
+      // Tags are restricted to main (the team only tags on main); the count
+      // is from HEAD so unmerged work on your branch is visible.
+      String? latestTag;
+      int? commitsSinceTag;
+      if (mainBranch != null) {
+        final tagRes = await _run(
+          ['describe', '--tags', '--abbrev=0', 'origin/$mainBranch'],
+          projectPath,
+        );
+        if (tagRes.exitCode == 0) {
+          final tag = (tagRes.stdout as String).trim();
+          if (tag.isNotEmpty) {
+            latestTag = tag;
+            final countRes = await _run(
+              ['rev-list', '--count', '$tag..HEAD'],
+              projectPath,
+            );
+            if (countRes.exitCode == 0) {
+              commitsSinceTag =
+                  int.tryParse((countRes.stdout as String).trim());
+            }
+          }
+        }
+      }
+
       // FETCH_HEAD mtime as proxy for "last fetched".
       DateTime? lastFetched;
       final fetchHead = File(p.join(projectPath, '.git', 'FETCH_HEAD'));
@@ -243,6 +272,8 @@ class Git {
         aheadUpstream: aheadUpstream,
         mainBranch: mainBranch,
         behindMain: behindMain,
+        latestTag: latestTag,
+        commitsSinceTag: commitsSinceTag,
         lastFetched: lastFetched,
       );
     } catch (e, st) {
@@ -261,7 +292,10 @@ class Git {
     if (!await dir.exists()) {
       return GitStatusDto(project: projectName, exists: false);
     }
-    final fetchRes = await _run(['fetch', '--prune', '--quiet', 'origin'], projectPath);
+    // `--tags` belt-and-suspenders: tags reachable from fetched branches
+    // come along automatically, but a tag pointing at a commit that's no
+    // longer in the default-fetched set would otherwise be missed.
+    final fetchRes = await _run(['fetch', '--prune', '--tags', '--quiet', 'origin'], projectPath);
     if (fetchRes.exitCode != 0) {
       _log.warning(
         'git fetch failed for $projectName: ${(fetchRes.stderr as String).trim()}',

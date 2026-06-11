@@ -1,7 +1,7 @@
 name: limousine
 description: "Local dev orchestrator (headless Dart server + Flutter web UI)"
 publish_to: 'none'
-version: 0.3.0
+version: 0.4.3
 
 environment:
   sdk: ^3.10.1
@@ -11,7 +11,12 @@ dependencies:
     sdk: flutter
   flutter_riverpod: ^2.6.1
   xterm: ^4.0.0
-  flutter_pty: ^0.4.2
+  # Vendored fork of flutter_pty 0.4.2 — patched wait_exit_thread so unrelated
+  # SIGCHLD deliveries on macOS don't interrupt waitpid and post bogus exit
+  # codes (which would close a live PTY's output port). See
+  # vendor/flutter_pty/CHANGELOG.md and src/flutter_pty_unix.c for the patch.
+  flutter_pty:
+    path: vendor/flutter_pty
   path_provider: ^2.1.5
   file_picker: ^8.1.7
   path: ^1.9.1

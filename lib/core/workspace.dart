@@ -21,11 +21,16 @@ class McpConfig {
   final int port;
   final String? token;
 
-  McpConfig({this.enabled = false, this.port = 6891, this.token});
+  // MCP is on by default. Workspaces with an explicit `mcp.enabled: false`
+  // stay off; workspaces with no `mcp` block at all (see Workspace.fromJson)
+  // get a default-enabled config so first-time setups don't need to find
+  // the Settings dialog before agents can connect. Devs who don't want it
+  // can toggle via the AppBar / Settings.
+  McpConfig({this.enabled = true, this.port = 6891, this.token});
 
   factory McpConfig.fromJson(Map<String, dynamic> json) {
     return McpConfig(
-      enabled: json['enabled'] ?? false,
+      enabled: json['enabled'] ?? true,
       port: json['port'] ?? 6891,
       token: json['token'],
     );
@@ -67,7 +72,9 @@ class Workspace {
         (k, v) => MapEntry(k, ProjectRef.fromJson(k, v)),
       ),
       gitSshKeyPath: json['git-ssh-key-path'],
-      mcpConfig: json['mcp'] != null ? McpConfig.fromJson(json['mcp']) : null,
+      // No `mcp` block → default-enabled config. Lets new / pre-existing
+      // workspaces light up MCP automatically.
+      mcpConfig: json['mcp'] != null ? McpConfig.fromJson(json['mcp']) : McpConfig(),
     );
   }
 

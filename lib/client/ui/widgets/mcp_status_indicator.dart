@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/mcp_provider.dart';
+import '../../util/clipboard.dart';
 
 class McpStatusIndicator extends ConsumerWidget {
   const McpStatusIndicator({super.key});
@@ -74,9 +74,7 @@ class _McpDialogState extends ConsumerState<_McpDialog> {
   }
 
   void _copyConfig(String label, Map<String, dynamic> payload) {
-    Clipboard.setData(ClipboardData(
-      text: const JsonEncoder.withIndent('  ').convert(payload),
-    ));
+    copyToClipboard(const JsonEncoder.withIndent('  ').convert(payload));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$label config copied to clipboard'),

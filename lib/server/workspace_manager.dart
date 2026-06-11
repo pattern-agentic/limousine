@@ -90,8 +90,13 @@ class WorkspaceManager {
           e.offset,
         );
         loadError = 'Invalid JSON in limousine.proj:\n$snippet';
-      } catch (e) {
-        loadError = 'Failed to load project: $e';
+        _log.warning('Invalid JSON in $resolvedPath/limousine.proj', e);
+      } catch (e, st) {
+        // Surface the stack trace in both server stdout and the UI string —
+        // these are dev-only failures and a one-line "type X is not Y" is
+        // useless without the trace.
+        loadError = 'Failed to load project: $e\n\n$st';
+        _log.severe('Failed to load project $name at $resolvedPath', e, st);
       }
     }
     return LoadedProjectDto(

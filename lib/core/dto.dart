@@ -235,6 +235,8 @@ class GitStatusDto {
   final int? aheadUpstream;
   final String? mainBranch;     // resolved default branch ("main" / "master")
   final int? behindMain;        // null when branch == mainBranch
+  final String? latestTag;      // most recent tag reachable from origin/<main>
+  final int? commitsSinceTag;   // commits between latestTag and origin/<main>
   final DateTime? lastFetched;
   final String? error;
   final List<ConfigDeltaDto> configDeltas;
@@ -251,6 +253,8 @@ class GitStatusDto {
     this.aheadUpstream,
     this.mainBranch,
     this.behindMain,
+    this.latestTag,
+    this.commitsSinceTag,
     this.lastFetched,
     this.error,
     this.configDeltas = const [],
@@ -276,6 +280,8 @@ class GitStatusDto {
         if (aheadUpstream != null) 'aheadUpstream': aheadUpstream,
         if (mainBranch != null) 'mainBranch': mainBranch,
         if (behindMain != null) 'behindMain': behindMain,
+        if (latestTag != null) 'latestTag': latestTag,
+        if (commitsSinceTag != null) 'commitsSinceTag': commitsSinceTag,
         if (lastFetched != null) 'lastFetched': lastFetched!.toIso8601String(),
         if (error != null) 'error': error,
         'configDeltas': configDeltas.map((c) => c.toJson()).toList(),
@@ -296,6 +302,8 @@ class GitStatusDto {
       aheadUpstream: json['aheadUpstream'],
       mainBranch: json['mainBranch'],
       behindMain: json['behindMain'],
+      latestTag: json['latestTag'],
+      commitsSinceTag: json['commitsSinceTag'],
       lastFetched: json['lastFetched'] != null
           ? DateTime.parse(json['lastFetched'])
           : null,

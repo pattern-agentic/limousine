@@ -7,6 +7,7 @@ import '../../providers/api_provider.dart';
 import '../../providers/git_status_provider.dart';
 import '../../providers/services_provider.dart';
 import '../../providers/workspace_provider.dart';
+import '../../version.dart';
 import '../widgets/dashboard/dashboard_tab.dart';
 import '../widgets/dialogs/env_editor.dart';
 import '../widgets/dialogs/secrets_editor.dart';
@@ -73,31 +74,48 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
     return Scaffold(
       appBar: _buildAppBar(),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Row(
-          children: [
-            _Sidebar(
-              byProject: visibleByProject,
-              states: serviceStates,
-              runningCount: runningCount,
-              hideInactive: hideInactive,
-              hiddenCount: hiddenCount,
-              onToggleHideInactive: () =>
-                  ref.read(hideInactiveProvider.notifier).state = !hideInactive,
-              collapsedModules: collapsedModules,
-              collapsedProjects: collapsedProjects,
-              onToggleModule: (name) =>
-                  ref.read(collapsedModulesProvider.notifier).toggle(name),
-              onToggleProject: (name) =>
-                  ref.read(collapsedProjectsProvider.notifier).toggle(name),
-              selectedId: _selectedId,
-              onSelect: (id) => setState(() => _selectedId = id),
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Row(
+              children: [
+                _Sidebar(
+                  byProject: visibleByProject,
+                  runningCount: runningCount,
+                  hideInactive: hideInactive,
+                  hiddenCount: hiddenCount,
+                  onToggleHideInactive: () =>
+                      ref.read(hideInactiveProvider.notifier).state = !hideInactive,
+                  collapsedModules: collapsedModules,
+                  collapsedProjects: collapsedProjects,
+                  onToggleModule: (name) =>
+                      ref.read(collapsedModulesProvider.notifier).toggle(name),
+                  onToggleProject: (name) =>
+                      ref.read(collapsedProjectsProvider.notifier).toggle(name),
+                  selectedId: _selectedId,
+                  onSelect: (id) => setState(() => _selectedId = id),
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: _content(services)),
+              ],
             ),
-            const SizedBox(width: 16),
-            Expanded(child: _content(services)),
-          ],
-        ),
+          ),
+          const Positioned(
+            right: 10,
+            bottom: 6,
+            child: IgnorePointer(
+              child: Text(
+                'v$kLimousineVersion',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: Color(0xFF64748B),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -260,7 +278,6 @@ class _Title extends ConsumerWidget {
 
 class _Sidebar extends ConsumerWidget {
   final Map<String, Map<String, List<ClientServiceInfo>>> byProject;
-  final Map<String, ServiceStateDto> states;
   final int runningCount;
   final bool hideInactive;
   final int hiddenCount;
@@ -274,7 +291,6 @@ class _Sidebar extends ConsumerWidget {
 
   const _Sidebar({
     required this.byProject,
-    required this.states,
     required this.runningCount,
     required this.hideInactive,
     required this.hiddenCount,
@@ -292,7 +308,9 @@ class _Sidebar extends ConsumerWidget {
     return Container(
       width: 280,
       decoration: BoxDecoration(
-        color: const Color(0xFF0B1120),
+        // Darker than the project-card bg (0xFF111A2E) so each card pops
+        // visibly against the sidebar — matches the scaffold background.
+        color: const Color(0xFF020617),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Theme.of(context).dividerColor),
       ),
@@ -340,7 +358,6 @@ class _Sidebar extends ConsumerWidget {
                   _ProjectGroup(
                     name: project.key,
                     byModule: project.value,
-                    states: states,
                     expanded: !collapsedProjects.contains(project.key),
                     onToggleExpanded: () => onToggleProject(project.key),
                     collapsedModules: collapsedModules,
@@ -422,7 +439,6 @@ class _DashboardItem extends StatelessWidget {
 class _ProjectGroup extends StatelessWidget {
   final String name;
   final Map<String, List<ClientServiceInfo>> byModule;
-  final Map<String, ServiceStateDto> states;
   final bool expanded;
   final VoidCallback onToggleExpanded;
   final Set<String> collapsedModules;
@@ -433,7 +449,6 @@ class _ProjectGroup extends StatelessWidget {
   const _ProjectGroup({
     required this.name,
     required this.byModule,
-    required this.states,
     required this.expanded,
     required this.onToggleExpanded,
     required this.collapsedModules,
@@ -444,61 +459,71 @@ class _ProjectGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onToggleExpanded,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-            child: Row(
-              children: [
-                Icon(
-                  expanded
-                      ? Icons.keyboard_arrow_down
-                      : Icons.keyboard_arrow_right,
-                  size: 18,
-                  color: Colors.white.withOpacity(0.85),
-                ),
-                const SizedBox(width: 2),
-                const Icon(
-                  Icons.folder_outlined,
-                  size: 14,
-                  color: Color(0xFF94A3B8),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.4,
-                      color: Color(0xFFE5E7EB),
-                    ),
-                    overflow: TextOverflow.ellipsis,
+    // Subtle card around the whole project (header + nested modules + services)
+    // so the project boundary is visually distinct from the module headers
+    // inside it. One tone lighter than the sidebar background, thin border.
+    return Container(
+      margin: const EdgeInsets.fromLTRB(6, 0, 6, 11),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111A2E),
+        border: Border.all(color: const Color(0xFF1E293B), width: 1),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onToggleExpanded,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+              child: Row(
+                children: [
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    size: 18,
+                    color: Colors.white.withOpacity(0.85),
                   ),
-                ),
-                _ProjectKebab(projectName: name),
-              ],
-            ),
-          ),
-        ),
-        if (expanded)
-          for (final entry in byModule.entries)
-            Padding(
-              padding: const EdgeInsets.only(left: 12),
-              child: _ModuleGroup(
-                name: entry.key,
-                services: entry.value,
-                states: states,
-                expanded: !collapsedModules.contains(entry.key),
-                onToggleCollapsed: () => onToggleModule(entry.key),
-                selectedId: selectedId,
-                onSelect: onSelect,
+                  const SizedBox(width: 2),
+                  const Icon(
+                    Icons.folder_outlined,
+                    size: 14,
+                    color: Color(0xFF94A3B8),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                        color: Color(0xFFE5E7EB),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  _ProjectKebab(projectName: name),
+                ],
               ),
             ),
-      ],
+          ),
+          if (expanded)
+            for (final entry in byModule.entries)
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: _ModuleGroup(
+                  name: entry.key,
+                  services: entry.value,
+                  expanded: !collapsedModules.contains(entry.key),
+                  onToggleCollapsed: () => onToggleModule(entry.key),
+                  selectedId: selectedId,
+                  onSelect: onSelect,
+                ),
+              ),
+        ],
+      ),
     );
   }
 }
@@ -640,7 +665,6 @@ class _ProjectKebab extends ConsumerWidget {
 class _ModuleGroup extends ConsumerWidget {
   final String name;
   final List<ClientServiceInfo> services;
-  final Map<String, ServiceStateDto> states;
   final bool expanded;
   final VoidCallback onToggleCollapsed;
   final String? selectedId;
@@ -649,7 +673,6 @@ class _ModuleGroup extends ConsumerWidget {
   const _ModuleGroup({
     required this.name,
     required this.services,
-    required this.states,
     required this.expanded,
     required this.onToggleCollapsed,
     required this.selectedId,
@@ -675,7 +698,10 @@ class _ModuleGroup extends ConsumerWidget {
           borderRadius: BorderRadius.circular(12),
           onTap: onToggleCollapsed,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+            // right=8 matches the project header + service rows, so all three
+            // trailing widgets (project kebab, module kebab, row action) line
+            // up vertically along the same right edge.
+            padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
             child: Row(
               children: [
                 Icon(
@@ -704,12 +730,10 @@ class _ModuleGroup extends ConsumerWidget {
         ),
         if (expanded)
           ...services.map((s) {
-            final running = states[s.id]?.status == ProcessStatus.running;
             final selected = selectedId == s.id;
             return _ServiceRow(
               service: s,
               selected: selected,
-              running: running,
               onTap: () => onSelect(s.id),
             );
           }),
@@ -718,21 +742,24 @@ class _ModuleGroup extends ConsumerWidget {
   }
 }
 
-class _ServiceRow extends StatelessWidget {
+class _ServiceRow extends ConsumerWidget {
   final ClientServiceInfo service;
   final bool selected;
-  final bool running;
   final VoidCallback onTap;
 
   const _ServiceRow({
     required this.service,
     required this.selected,
-    required this.running,
     required this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state =
+        ref.watch(serviceStatesProvider.select((m) => m[service.id]));
+    final status = state?.status ?? ProcessStatus.stopped;
+    final running = status == ProcessStatus.running;
+
     return Padding(
       padding: const EdgeInsets.only(left: 16.0, right: 8.0, bottom: 4.0),
       child: InkWell(
@@ -766,10 +793,161 @@ class _ServiceRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 8),
+              _ServiceRowAction(
+                service: service,
+                status: status,
+                state: state,
+                onActed: onTap,
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Inline action button at the trailing edge of each sidebar service row.
+/// Click opens a popdown — the menu acts as the confirmation surface so the
+/// mouse never has to leave the row to start/stop.
+class _ServiceRowAction extends ConsumerWidget {
+  final ClientServiceInfo service;
+  final ProcessStatus status;
+  final ServiceStateDto? state;
+  // Called after the user picks a start/stop/kill action, so the row also
+  // selects itself — switching the right pane to this service's output is
+  // almost always what you want next.
+  final VoidCallback onActed;
+
+  const _ServiceRowAction({
+    required this.service,
+    required this.status,
+    required this.state,
+    required this.onActed,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(serviceStatesProvider.notifier);
+
+    switch (status) {
+      case ProcessStatus.running:
+        final signal = state?.nextSignal ?? StopSignal.sigint;
+        return _IconPopup<String>(
+          icon: Icons.stop_circle_outlined,
+          // Dull red — visible but doesn't pull the eye across the sidebar.
+          color: const Color(0xFFEF4444).withOpacity(0.55),
+          tooltip: 'Stop ${service.serviceName}',
+          items: [
+            PopupMenuItem(
+              value: 'stop',
+              height: 36,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.stop_circle,
+                      size: 14, color: Color(0xFFEF4444)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Stop (${signal.name.toUpperCase()})',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          onSelected: (_) {
+            onActed();
+            notifier.stop(service.id);
+          },
+        );
+      case ProcessStatus.orphaned:
+        return _IconPopup<String>(
+          icon: Icons.warning_amber_outlined,
+          color: const Color(0xFFF97316).withOpacity(0.7),
+          tooltip: 'Kill orphan ${service.serviceName}',
+          items: [
+            const PopupMenuItem(
+              value: 'kill',
+              height: 36,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.dangerous_outlined,
+                      size: 14, color: Color(0xFFF97316)),
+                  SizedBox(width: 8),
+                  Text('Kill orphan', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+          onSelected: (_) {
+            onActed();
+            notifier.killOrphan(service.id);
+          },
+        );
+      case ProcessStatus.stopped:
+        final commands = service.service.commands;
+        if (commands.isEmpty) return const SizedBox(width: 24);
+        return _IconPopup<String>(
+          icon: Icons.play_arrow_outlined,
+          // Boring grey — present, but doesn't make the sidebar feel busy.
+          color: Colors.white.withOpacity(0.35),
+          tooltip: 'Start ${service.serviceName}',
+          items: [
+            for (final name in commands.keys)
+              PopupMenuItem(
+                value: name,
+                height: 36,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.play_arrow,
+                        size: 14, color: Color(0xFF22C55E)),
+                    const SizedBox(width: 8),
+                    Text(name, style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+          ],
+          onSelected: (cmd) {
+            onActed();
+            notifier.start(service.id, command: cmd);
+          },
+        );
+    }
+  }
+}
+
+class _IconPopup<T> extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String tooltip;
+  final List<PopupMenuEntry<T>> items;
+  final ValueChanged<T> onSelected;
+
+  const _IconPopup({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.items,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 24,
+      height: 24,
+      child: PopupMenuButton<T>(
+        tooltip: tooltip,
+        padding: EdgeInsets.zero,
+        iconSize: 16,
+        splashRadius: 14,
+        icon: Icon(icon, size: 16, color: color),
+        color: const Color(0xFF0B1120),
+        itemBuilder: (_) => items,
+        onSelected: onSelected,
       ),
     );
   }

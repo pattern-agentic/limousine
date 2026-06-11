@@ -20,6 +20,10 @@ BIN_DIR    := build/bin
 WEB_DIR    := build/web
 PTY_SO     := build/linux/x64/release/bundle/lib/libflutter_pty.so
 DART_SRC   := $(shell find lib bin -name '*.dart' 2>/dev/null)
+# Extract `version: X.Y.Z` from pubspec.yaml so both the web bundle and the
+# native binary embed it as a compile-time constant via `--dart-define` /
+# `--define`. Read via `String.fromEnvironment('LIMOUSINE_VERSION')`.
+VERSION    := $(shell awk '/^version:/{print $$2; exit}' pubspec.yaml)
 
 .PHONY: help
 help:
@@ -33,15 +37,15 @@ help:
 .PHONY: local-build
 local-build: $(BIN_DIR)/limousine-server $(BIN_DIR)/libflutter_pty.so $(BIN_DIR)/limousine-server.sh $(WEB_DIR)/index.html  ## Build web bundle + native server binary into build/bin
 
-$(WEB_DIR)/index.html: $(DART_SRC) pubspec.lock
-	flutter build web --no-tree-shake-icons --release
+$(WEB_DIR)/index.html: $(DART_SRC) pubspec.lock pubspec.yaml
+	flutter build web --no-tree-shake-icons --release --dart-define=LIMOUSINE_VERSION=$(VERSION)
 
 $(PTY_SO): pubspec.lock
 	flutter build linux --release
 
-$(BIN_DIR)/limousine-server: $(DART_SRC) pubspec.lock
+$(BIN_DIR)/limousine-server: $(DART_SRC) pubspec.lock pubspec.yaml
 	@mkdir -p $(BIN_DIR)
-	dart compile exe bin/server.dart -o $(BIN_DIR)/limousine-server
+	dart compile exe --define=LIMOUSINE_VERSION=$(VERSION) bin/server.dart -o $(BIN_DIR)/limousine-server
 
 $(BIN_DIR)/libflutter_pty.so: $(PTY_SO)
 	@mkdir -p $(BIN_DIR)

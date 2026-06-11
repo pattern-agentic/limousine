@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/dto.dart';
@@ -28,6 +29,7 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
         ref.read(gitStatusProvider.notifier).load(widget.project.name);
       });
     }
+    _logLoadErrorOnce(widget.project);
   }
 
   @override
@@ -37,6 +39,24 @@ class _ProjectCardState extends ConsumerState<ProjectCard> {
     if (!old.project.existsOnDisk && widget.project.existsOnDisk) {
       ref.read(gitStatusProvider.notifier).load(widget.project.name);
     }
+    if (old.project.loadError != widget.project.loadError) {
+      _logLoadErrorOnce(widget.project);
+    }
+  }
+
+  /// Send loadError to the browser console as a real error so it's
+  /// inspectable (stack trace + filterable in DevTools). The UI also shows
+  /// the same string in the expanded card body, so the user can copy-paste
+  /// from either place.
+  void _logLoadErrorOnce(LoadedProjectDto project) {
+    final err = project.loadError;
+    if (err == null || err.isEmpty) return;
+    developer.log(
+      err,
+      name: 'limousine.workspace',
+      level: 1000, // SEVERE in Dart's logging convention
+      error: 'loadError on project ${project.name}',
+    );
   }
 
   Future<void> _clone() async {
@@ -259,6 +279,18 @@ class _GitLine extends StatelessWidget {
             ),
           ),
         ],
+        if (status.latestTag != null) ...[
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Most recent tag on origin/'
+                '${status.mainBranch ?? "main"}'
+                '${(status.commitsSinceTag ?? 0) > 0 ? ", ${status.commitsSinceTag} commit(s) ahead at HEAD" : " (HEAD is at the tag)"}',
+            child: _TagBadge(
+              tag: status.latestTag!,
+              ahead: status.commitsSinceTag ?? 0,
+            ),
+          ),
+        ],
         const SizedBox(width: 10),
         Expanded(child: _Chips(status: status)),
         if (status.lastFetched != null)
@@ -276,6 +308,41 @@ class _GitLine extends StatelessWidget {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 48) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+class _TagBadge extends StatelessWidget {
+  final String tag;
+  final int ahead;
+  const _TagBadge({required this.tag, required this.ahead});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = ahead > 0 ? '$tag +$ahead' : tag;
+    const color = Color(0xFFA78BFA); // muted purple — distinct from sha/branch.
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.local_offer_outlined, size: 11, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 11,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

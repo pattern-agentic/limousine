@@ -1,34 +1,213 @@
 #!/usr/bin/env bash
 # limousine — launch the limousine server container, mounting your workspace,
-# docker socket, and the usual auth/config dirs.
+# docker socket, and the usual auth/config dirs. Run `limousine --help` for
+# usage. See also `--help-env` and `--help-config`.
 #
-# Usage:
-#   limousine /abs/path/to/foo.wksp                              # serve, auto-open
-#   limousine                                                    # pick wksp in UI
-#   limousine --lan /abs/path/foo.wksp                           # bind to 0.0.0.0
-#   limousine --clone-root /abs/path/projects /abs/path/foo.wksp # re-root clones
-#
-# Env overrides:
-#   LIMOUSINE_IMAGE                default ghcr.io/pattern-agentic/limousine:latest
-#   LIMOUSINE_PORT                 default 7891   — main HTTP port
-#   LIMOUSINE_MCP_PORT             default 6891   — MCP server port
-#   LIMOUSINE_MOUNT_ROOT           override the host directory bind-mounted
-#                                  into the container.
-#   LIMOUSINE_AGE_KEY              if set, bypasses the interactive prompt
-#                                  (must be a `AGE-SECRET-KEY-…` value).
-#   LIMOUSINE_NO_KEY_PROMPT        set to 1 to start with no age key (secret
-#                                  store stays locked, sops-encrypted secrets
-#                                  cannot be decrypted by services).
+# Maintainer note: `LIMOUSINE_AGE_KEY` is read at startup but deliberately
+# left out of all user-facing `--help` output. Setting it inline at a shell
+# prompt typically lands the secret in `~/.bash_history` / `~/.zsh_history`,
+# and we don't want to push devs in that direction. The wrapper prompts for
+# the key interactively (no echo) instead. `LIMOUSINE_NO_KEY_PROMPT=1` is
+# also undocumented in --help: it disables the prompt so the wrapper can be
+# driven from CI/automation without an interactive tty.
 
 set -euo pipefail
+
+print_help_brief() {
+  cat <<'EOF'
+limousine — launch the limousine server container.
+
+First-time setup:
+  limousine --setup                         # interactive wizard, saves ~/.limousine.config
+
+After setup, just `limousine` re-launches with the saved defaults. Or:
+
+  limousine /abs/path/to/foo.wksp           # serve, auto-open the workspace
+  limousine --lan /abs/path/foo.wksp        # bind to 0.0.0.0 instead of localhost
+  limousine --clone-root /abs/path /foo.wksp # re-root project clones
+
+More:
+  limousine --help-config    persistent defaults + supported variables
+EOF
+}
+
+abs_path() {
+  # `-m` (canonicalize, don't require path components to exist) instead of
+  # `-f`. The setup wizard often resolves paths that haven't been created
+  # yet (e.g. a workspace file inside an unfetched clone-root), and `-f`
+  # would exit 1 there — `set -e` then kills the script silently.
+  if command -v readlink >/dev/null 2>&1 && readlink -m / >/dev/null 2>&1; then
+    readlink -m "$1"
+  else
+    # macOS: GNU `readlink -m` isn't available; python's realpath has the
+    # same "no existence required" semantics.
+    python3 -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$1"
+  fi
+}
+
+run_setup_wizard() {
+  if [ ! -t 0 ]; then
+    echo "error: --setup needs an interactive terminal" >&2
+    exit 2
+  fi
+
+  if [ -f "$CONFIG_FILE" ]; then
+    echo
+    echo "⚠ $CONFIG_FILE already exists. The wizard will overwrite it (an automatic backup is kept)."
+    printf "Continue? [y/N] "
+    local confirm=""
+    read -r confirm
+    case "$confirm" in
+      y|Y|yes|YES) ;;
+      *) echo "Cancelled."; exit 0 ;;
+    esac
+  fi
+
+  echo
+  echo "limousine setup — answer the prompts to save defaults to $CONFIG_FILE."
+  echo "Press Enter to accept the default in [brackets]."
+  echo
+
+  local default_workspace="./eng/pa-cluster.limousine.wksp"
+  local default_clone_root="./eng"
+
+  printf "Workspace file [%s]: " "$default_workspace"
+  local workspace=""
+  read -r workspace
+  workspace="${workspace:-$default_workspace}"
+  local workspace_abs
+  workspace_abs="$(abs_path "$workspace")"
+
+  printf "Clone root for project repos [%s]: " "$default_clone_root"
+  local clone_root=""
+  read -r clone_root
+  clone_root="${clone_root:-$default_clone_root}"
+  local clone_root_abs
+  clone_root_abs="$(abs_path "$clone_root")"
+
+  echo
+  echo "Bind host:"
+  echo "  1) localhost (127.0.0.1) — only your machine can hit the UI"
+  echo "  2) LAN       (0.0.0.0)   — anyone on your network can hit the UI"
+  printf "Choice [1]: "
+  local bind_choice=""
+  read -r bind_choice
+  bind_choice="${bind_choice:-1}"
+  local lan_value
+  case "$bind_choice" in
+    1) lan_value=0 ;;
+    2) lan_value=1 ;;
+    *) echo "error: invalid choice — must be 1 or 2" >&2; exit 2 ;;
+  esac
+
+  if [ -f "$CONFIG_FILE" ]; then
+    local backup
+    backup="$CONFIG_FILE.$(date -u +%Y-%m-%dT%H-%M-%SZ).bak"
+    cp -p "$CONFIG_FILE" "$backup"
+    echo
+    echo "Backed up existing config to: $backup"
+  fi
+
+  cat > "$CONFIG_FILE" <<EOF
+# Written by \`limousine --setup\` on $(date -u +%Y-%m-%dT%H:%M:%SZ).
+# Edit by hand or re-run --setup to regenerate.
+# See \`limousine --help-config\` for all supported keys (ports, image, …).
+LIMOUSINE_WORKSPACE=$workspace_abs
+LIMOUSINE_CLONE_ROOT=$clone_root_abs
+LIMOUSINE_LAN=$lan_value
+EOF
+  chmod 600 "$CONFIG_FILE"
+
+  echo
+  echo "✓ Saved $CONFIG_FILE:"
+  grep -v '^#' "$CONFIG_FILE" | sed 's/^/    /'
+  echo
+  # Echo back the exact invocation form the user used (./scripts/limousine,
+  # bare `limousine` if on PATH, /abs/path, …) so the suggested next step
+  # works without needing to know where the script lives.
+  echo "Run \`$0\` to start the server."
+  exit 0
+}
+
+print_help_config() {
+  cat <<'EOF'
+limousine — ~/.limousine.config + environment overrides
+
+Shell-style KEY=VALUE per line in ~/.limousine.config, or set as a regular
+env var in your shell. Supported keys:
+
+  LIMOUSINE_IMAGE         default ghcr.io/pattern-agentic/limousine:latest
+  LIMOUSINE_PORT          default 7891   — main HTTP port
+  LIMOUSINE_MCP_PORT      default 6891   — MCP server port
+  LIMOUSINE_MOUNT_ROOT    override the host directory bind-mounted into the container
+  LIMOUSINE_CLONE_ROOT    default for --clone-root
+  LIMOUSINE_LAN           set to 1 to bind to 0.0.0.0 by default
+  LIMOUSINE_WORKSPACE     default workspace path (positional arg overrides)
+
+Precedence (highest wins):
+  CLI flag → env var already set in your shell → value from ~/.limousine.config → built-in default.
+
+Loaded keys are printed at startup so the active config is never silent.
+
+Example ~/.limousine.config:
+  LIMOUSINE_CLONE_ROOT=/Users/you/Projects/pa
+  LIMOUSINE_WORKSPACE=/Users/you/Projects/pa/dev-env/pa-cluster/limousine.wksp
+  LIMOUSINE_LAN=1
+EOF
+}
+
+# ─── Config file ──────────────────────────────────────────────────────────
+# Read ~/.limousine.config and populate any LIMOUSINE_* vars that aren't
+# already set in the environment. We don't `source` the file — that would
+# allow arbitrary code execution if anyone fat-fingers a value. Plain
+# KEY=VALUE parsing only, with optional surrounding quotes.
+CONFIG_FILE="${HOME}/.limousine.config"
+LOADED_FROM_CONFIG=()
+
+_read_conf() {
+  local key="$1"
+  # All `return` paths below need an explicit 0 — `set -e` kills the whole
+  # script if a top-level function call returns non-zero, and the bare-test
+  # patterns like `[ -f $f ] || return` would propagate the test's exit
+  # status (1) up to the caller. Silently exiting with no output is exactly
+  # what just bit `--help`.
+
+  # Shell env wins — leave alone if already set to a non-empty value.
+  [ -n "${!key:-}" ] && return 0
+  [ -f "$CONFIG_FILE" ] || return 0
+  local line v
+  line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$CONFIG_FILE" 2>/dev/null | tail -n1)" || true
+  [ -n "$line" ] || return 0
+  v="${line#*=}"
+  # Trim surrounding whitespace.
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  # Strip surrounding quotes (single or double).
+  case "$v" in
+    \"*\") v="${v#\"}"; v="${v%\"}" ;;
+    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+  esac
+  [ -n "$v" ] || return 0
+  printf -v "$key" '%s' "$v"
+  LOADED_FROM_CONFIG+=("$key=$v")
+}
+
+_read_conf LIMOUSINE_IMAGE
+_read_conf LIMOUSINE_PORT
+_read_conf LIMOUSINE_MCP_PORT
+_read_conf LIMOUSINE_MOUNT_ROOT
+_read_conf LIMOUSINE_CLONE_ROOT
+_read_conf LIMOUSINE_LAN
+_read_conf LIMOUSINE_WORKSPACE
 
 IMAGE="${LIMOUSINE_IMAGE:-ghcr.io/pattern-agentic/limousine:latest}"
 PORT="${LIMOUSINE_PORT:-7891}"
 MCP_PORT="${LIMOUSINE_MCP_PORT:-6891}"
 
-LAN=0
-WORKSPACE=""
-CLONE_ROOT=""
+LAN="${LIMOUSINE_LAN:-0}"
+WORKSPACE="${LIMOUSINE_WORKSPACE:-}"
+CLONE_ROOT="${LIMOUSINE_CLONE_ROOT:-}"
+initial_argc="$#"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --lan) LAN=1; shift ;;
@@ -40,28 +219,37 @@ while [ "$#" -gt 0 ]; do
       fi
       shift 2 ;;
     --clone-root=*) CLONE_ROOT="${1#--clone-root=}"; shift ;;
-    -h|--help)
-      sed -n '2,18p' "$0" | sed 's/^# *//'
-      exit 0 ;;
+    -h|--help) print_help_brief; exit 0 ;;
+    --help-config) print_help_config; exit 0 ;;
+    --setup) run_setup_wizard ;;
     --) shift; WORKSPACE="${1:-}"; shift || true ;;
-    -*) echo "error: unknown flag $1" >&2; exit 2 ;;
+    -*) echo "error: unknown flag $1 (try --help)" >&2; exit 2 ;;
     *) WORKSPACE="$1"; shift ;;
   esac
 done
+
+# Bare invocation (no CLI args) AND no workspace resolved from config/env.
+# Two cases: no config file at all → point at --setup; config exists but
+# didn't set a workspace → fall back to full help so they can see all
+# options. Either way, exit cleanly without trying to launch.
+if [ "$initial_argc" -eq 0 ] && [ -z "$WORKSPACE" ]; then
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "No ${CONFIG_FILE} found." >&2
+    echo "Run \`limousine --setup\` for the interactive wizard, or" >&2
+    echo "\`limousine --help\` for the full flag list." >&2
+  else
+    echo "${CONFIG_FILE} doesn't set LIMOUSINE_WORKSPACE." >&2
+    echo "Pass a workspace path as the first argument, or re-run" >&2
+    echo "\`limousine --setup\` to update the config." >&2
+  fi
+  exit 0
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "error: docker is required" >&2
   exit 1
 fi
-
-abs_path() {
-  if command -v readlink >/dev/null 2>&1 && readlink -f / >/dev/null 2>&1; then
-    readlink -f "$1"
-  else
-    # macOS: readlink -f isn't available
-    python3 -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$1"
-  fi
-}
+# abs_path() defined earlier (used by the --setup wizard too).
 
 if [ -n "$WORKSPACE" ]; then
   WORKSPACE_ABS="$(abs_path "$WORKSPACE")"
@@ -81,6 +269,41 @@ if [ -n "$CLONE_ROOT" ]; then
   CLONE_ROOT_ABS="$(abs_path "$CLONE_ROOT")"
 fi
 
+# -- Bind host --------------------------------------------------------------
+# Resolved before the age-key prompt so the launch summary can include it.
+BIND_HOST="127.0.0.1"
+if [ "$LAN" = "1" ]; then
+  BIND_HOST="0.0.0.0"
+  echo "⚠  --lan: binding to 0.0.0.0. Secret values are still gated by your"  >&2
+  echo "    age private key in the Authorization header, but anyone on the LAN" >&2
+  echo "    who has that key can read the decrypted values. Service terminals"  >&2
+  echo "    are NOT gated."                                                      >&2
+fi
+
+# -- Launch summary ---------------------------------------------------------
+# Printed BEFORE the age-key prompt so devs see what they're about to launch
+# while they're deciding whether to paste their key. The "secret store" status
+# line is the only thing that prints after the prompt (it depends on whether
+# a key was actually entered).
+echo "▶ ${IMAGE}"
+echo "  http://${BIND_HOST}:${PORT}    (UI)"
+echo "  http://${BIND_HOST}:${MCP_PORT}/mcp (MCP, if enabled)"
+echo "  mounting ${MOUNT_ROOT}"
+[ -n "$WORKSPACE_ABS" ] && echo "  workspace ${WORKSPACE_ABS}"
+[ -n "$CLONE_ROOT_ABS" ] && echo "  clone root ${CLONE_ROOT_ABS}"
+if [ "${#LOADED_FROM_CONFIG[@]}" -gt 0 ]; then
+  echo "  loaded from ${CONFIG_FILE}:"
+  for kv in "${LOADED_FROM_CONFIG[@]}"; do
+    echo "    $kv"
+  done
+fi
+if [ "$(uname -s)" = "Darwin" ]; then
+  echo "  macOS: requires Docker Desktop ≥ 4.34 with Settings → Resources →"
+  echo "         Network → 'Enable host networking' toggled ON. If the UI"
+  echo "         isn't reachable at the URL above, that toggle is the cause."
+fi
+echo
+
 # -- Age private key prompt --------------------------------------------------
 # Read once, interactively, with no echo. Empty input → secret store stays
 # locked at startup; sops-encrypted secrets won't be decryptable until you
@@ -97,16 +320,7 @@ if [ -z "${LIMOUSINE_AGE_KEY:-}" ] && [ "${LIMOUSINE_NO_KEY_PROMPT:-0}" != "1" ]
     exit 2
   fi
 fi
-
-# -- Bind host --------------------------------------------------------------
-BIND_HOST="127.0.0.1"
-if [ "$LAN" = "1" ]; then
-  BIND_HOST="0.0.0.0"
-  echo "⚠  --lan: binding to 0.0.0.0. Secret values are still gated by your"  >&2
-  echo "    age private key in the Authorization header, but anyone on the LAN" >&2
-  echo "    who has that key can read the decrypted values. Service terminals"  >&2
-  echo "    are NOT gated."                                                      >&2
-fi
+[ -z "${LIMOUSINE_AGE_KEY:-}" ] && echo "  secret store: locked (no age key supplied)"
 
 # -- docker run args --------------------------------------------------------
 ARGS=(--rm)
@@ -199,17 +413,6 @@ SERVER_ARGS=(--host "$BIND_HOST" --port "$PORT")   # with --network host, this b
 [ -n "$WORKSPACE_ABS" ] && SERVER_ARGS+=(--workspace "$WORKSPACE_ABS")
 [ -n "$CLONE_ROOT_ABS" ] && SERVER_ARGS+=(--clone-root "$CLONE_ROOT_ABS")
 
-echo "▶ ${IMAGE}"
-echo "  http://${BIND_HOST}:${PORT}    (UI)"
-echo "  http://${BIND_HOST}:${MCP_PORT}/mcp (MCP, if enabled)"
-echo "  mounting ${MOUNT_ROOT}"
-[ -n "$WORKSPACE_ABS" ] && echo "  workspace ${WORKSPACE_ABS}"
-[ -n "$CLONE_ROOT_ABS" ] && echo "  clone root ${CLONE_ROOT_ABS}"
-[ -z "${LIMOUSINE_AGE_KEY:-}" ] && echo "  secret store: locked (no age key supplied)"
-if [ "$(uname -s)" = "Darwin" ]; then
-  echo "  macOS: requires Docker Desktop ≥ 4.34 with Settings → Resources →"
-  echo "         Network → 'Enable host networking' toggled ON. If the UI"
-  echo "         isn't reachable at the URL above, that toggle is the cause."
-fi
+# Launch summary already printed before the age-key prompt above.
 
 exec docker run "${ARGS[@]}" "$IMAGE" "${SERVER_ARGS[@]}"

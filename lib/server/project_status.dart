@@ -71,6 +71,8 @@ class ProjectStatus {
       aheadUpstream: status.aheadUpstream,
       mainBranch: status.mainBranch,
       behindMain: status.behindMain,
+      latestTag: status.latestTag,
+      commitsSinceTag: status.commitsSinceTag,
       lastFetched: status.lastFetched,
       error: status.error,
       configDeltas: deltas,

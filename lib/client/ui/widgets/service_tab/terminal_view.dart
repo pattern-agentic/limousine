@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:xterm/xterm.dart' as xterm;
 import 'package:xterm/ui.dart' as xterm_ui;
 import '../../../providers/terminal_provider.dart';
+import '../../../util/clipboard.dart';
 
 class TerminalPanel extends ConsumerStatefulWidget {
   final String serviceId;
@@ -25,10 +25,30 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
   }
 
   void _copySelection(xterm.Terminal terminal) {
+    // Two paths so the button is always useful:
+    // - drag-selection present  → copy just the selection
+    // - no selection (e.g. Firefox+canvas drag didn't latch on, or the
+    //   user just wants everything) → copy the entire buffer including
+    //   scrollback. `buffer.getText()` with no range covers all of it.
     final selection = _controller.selection;
-    if (selection == null) return;
-    final text = terminal.buffer.getText(selection);
-    Clipboard.setData(ClipboardData(text: text));
+    final text = selection != null
+        ? terminal.buffer.getText(selection)
+        : terminal.buffer.getText();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Nothing to copy — buffer is empty'),
+        duration: Duration(seconds: 2),
+      ));
+      return;
+    }
+    copyToClipboard(text);
+    final label = selection != null
+        ? 'Copied selection (${text.length} chars)'
+        : 'Copied terminal buffer (${text.length} chars)';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(label),
+      duration: const Duration(seconds: 2),
+    ));
   }
 
   @override
