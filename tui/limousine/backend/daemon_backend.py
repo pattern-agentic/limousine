@@ -178,6 +178,11 @@ class DaemonBackend(Backend):
     def send_input(self, sid: str, text: str) -> None:
         self._fire("send_input", sid, text)
 
+    def inject_log(self, sid: str, text: str) -> None:
+        # injected on the daemon so it lands in-order in the shared buffer and
+        # pushes back to every client
+        self._fire("inject_log", sid, text)
+
     def close_workspace(self) -> None:
         self._fire("close_workspace")
 

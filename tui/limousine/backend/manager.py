@@ -165,6 +165,15 @@ class ServiceManager:
         self._set_state(sid, ProcessStatus.running, pid=proc.pid, start_time=r.start_epoch)
         asyncio.get_running_loop().add_reader(proc.fd, self._readable, sid)
 
+    def inject(self, sid: str, line: str) -> None:
+        """Append a synthetic line (e.g. a user separator) to a service's log
+        buffer and emit it, so it shows live and persists / saves like real
+        output."""
+        buf = self._buffers.setdefault(sid, deque(maxlen=BUFFER_LINES))
+        buf.append(line)
+        if self.on_output:
+            self.on_output(sid, [line])
+
     def send_input(self, sid: str, text: str) -> None:
         r = self._running.get(sid)
         if r is not None:

@@ -456,6 +456,49 @@ async def test_command_picker_copy_and_edit(tmp_path):
         await backend.stop_service("m/svc")
 
 
+async def test_log_sticky_scroll_and_mark():
+    from textual.widgets import RichLog
+
+    backend = LocalBackend()
+    await backend.open_workspace(DEMO)
+    app = LimousineApp(backend, mcp_allowed=False)
+    async with app.run_test(size=(120, 10)) as pilot:  # short pane → log scrolls
+        await pilot.pause()
+        app.selected = "demo/ticker"
+        app._displayed = "demo/ticker"
+        for i in range(60):
+            backend.inject_log("demo/ticker", f"line {i}")
+        for _ in range(6):
+            app._drain()
+            await pilot.pause()
+        log = app.query_one("#log", RichLog)
+        assert log.max_scroll_y > 0
+
+        # scrolled up + new output → view stays put (not yanked to bottom)
+        log.scroll_home(animate=False)
+        await pilot.pause()
+        for i in range(30):
+            backend.inject_log("demo/ticker", f"more {i}")
+        for _ in range(4):
+            app._drain()
+            await pilot.pause()
+        assert log.scroll_offset.y <= 1
+
+        # at the bottom + new output → follows
+        log.scroll_end(animate=False)
+        await pilot.pause()
+        for i in range(30):
+            backend.inject_log("demo/ticker", f"tail {i}")
+        for _ in range(4):
+            app._drain()
+            await pilot.pause()
+        assert log.scroll_offset.y >= log.max_scroll_y - 1
+
+        # mark injects a separator into the buffer (persists + saves)
+        app.action_mark()
+        assert any("─" in l for l in backend.buffer("demo/ticker"))
+
+
 async def test_startup_screen_when_no_workspace():
     backend = LocalBackend()  # never opened
     app = LimousineApp(backend, mcp_allowed=False)

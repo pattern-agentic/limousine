@@ -69,6 +69,8 @@ class Backend(ABC):
     @abstractmethod
     def send_input(self, sid: str, text: str) -> None: ...
     @abstractmethod
+    def inject_log(self, sid: str, text: str) -> None: ...
+    @abstractmethod
     def buffer(self, sid: str): ...
     @abstractmethod
     def tail(self, sid: str) -> str: ...
@@ -203,6 +205,9 @@ class LocalBackend(Backend):
 
     def send_input(self, sid: str, text: str) -> None:
         self.manager.send_input(sid, text)
+
+    def inject_log(self, sid: str, text: str) -> None:
+        self.manager.inject(sid, text)
 
     def buffer(self, sid: str):
         return self.manager.buffer(sid)

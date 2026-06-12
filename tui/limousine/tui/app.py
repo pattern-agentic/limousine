@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from rich.text import Text
@@ -72,6 +73,12 @@ class LimousineApp(App):
         Binding("comma", "settings", "Settings", show=False),
         Binding("o", "open", "Open workspace", show=False),
         Binding("ctrl+l", "clear", "Clear log", show=False),
+        Binding("minus", "mark", "Mark log", show=False),  # inject a separator
+        # log scrolling (the tree doesn't bind these, so they reach the log)
+        Binding("pagedown", "log_pagedown", "Log ↓", show=False),
+        Binding("pageup", "log_pageup", "Log ↑", show=False),
+        Binding("end", "log_end", "Log to end", show=False),
+        Binding("home", "log_top", "Log to top", show=False),
     ]
 
     def __init__(self, backend: Backend, mcp_allowed: bool = True, mcp_port_override: int | None = None,
@@ -293,7 +300,7 @@ class LimousineApp(App):
         log.clear()
         buf = list(self.backend.buffer(sid)) if sid else []
         if buf:
-            log.write(Text.from_ansi("\n".join(buf)))
+            log.write(Text.from_ansi("\n".join(buf)), scroll_end=True)  # show the latest
         self._update_header()
         self._update_liveline()
 
@@ -335,9 +342,13 @@ class LimousineApp(App):
         self._update_liveline()
         if not self._pending:
             return
+        log = self.query_one("#log", RichLog)
+        # sticky-bottom: only follow new output if already scrolled to the end,
+        # so reading history isn't yanked away by incoming lines
+        at_bottom = log.scroll_offset.y >= log.max_scroll_y - 1
         take = self._pending[:300]
         del self._pending[:300]
-        self.query_one("#log", RichLog).write(Text.from_ansi("\n".join(take)))
+        log.write(Text.from_ansi("\n".join(take)), scroll_end=at_bottom)
 
     # ---- backend callbacks ----------------------------------------------
 
@@ -606,6 +617,7 @@ class LimousineApp(App):
     def action_menu(self) -> None:
         items = [
             ("agent_guide", "Agent guide"),
+            ("mark", "Mark log (insert separator)"),
             ("save_log", "Save log to file"),
             ("kill", "Kill orphan"),
             ("reload_project", "Reload project"),
@@ -667,6 +679,28 @@ class LimousineApp(App):
 
     def action_clear(self) -> None:
         self.query_one("#log", RichLog).clear()
+
+    # ---- log scrolling + marking -----------------------------------------
+
+    def action_log_pagedown(self) -> None:
+        self.query_one("#log", RichLog).scroll_page_down()
+
+    def action_log_pageup(self) -> None:
+        self.query_one("#log", RichLog).scroll_page_up()
+
+    def action_log_end(self) -> None:
+        self.query_one("#log", RichLog).scroll_end()  # catch up to live
+
+    def action_log_top(self) -> None:
+        self.query_one("#log", RichLog).scroll_home()
+
+    def action_mark(self) -> None:
+        sid = self._displayed
+        if not sid:
+            self.notify("no log to mark")
+            return
+        bar = "─" * 24
+        self.backend.inject_log(sid, f"{bar}  {time.strftime('%H:%M:%S')}  {bar}")
 
     # ---- capturing the log ----------------------------------------------
 

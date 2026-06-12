@@ -22,7 +22,10 @@ editor · `g` git dashboard · `y` copy selection · `m` menu · `q` quit. The
 env/secrets editors show a diff — editable **active** file on the left, read-only
 **template** on the right, `ctrl+t` to pull missing keys in from the template (a
 clean checkout with only `env.example` is one keystroke from a filled `.env.dev`),
-`ctrl+s` to save. The log
+`ctrl+s` to save. The log pane sticks to the bottom only while you're already
+there — scroll up (mouse wheel / `pageup`) to read history without being yanked
+down by new output; `pagedown`/`end` catch back up. `-` inserts a timestamped
+separator line into the current log. The log
 pane supports mouse text selection — drag to select, `y` to copy (native
 clipboard, OSC 52 fallback). `w` (or the menu) dumps the full log to a tempfile.
 The menu (`m`) holds agent guide, save log, kill orphan, reload project, reload
