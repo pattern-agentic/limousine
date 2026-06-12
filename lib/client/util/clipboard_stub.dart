@@ -1,1 +1,0 @@
-void webCopy(String text) {}
