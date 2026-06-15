@@ -136,15 +136,24 @@ def prompt_age_key() -> str:
 
     Honors `LIMOUSINE_AGE_KEY` (already set) and `LIMOUSINE_NO_KEY_PROMPT=1`
     (CI/automation: skip the prompt). Non-tty with no key → skip, store locked.
+
+    Enter on an empty prompt (or Ctrl+D) skips, leaving the store locked.
+    Ctrl+C aborts startup entirely (raises SystemExit), so it never silently
+    falls through to a locked TUI.
     """
     if os.environ.get("LIMOUSINE_AGE_KEY"):
         return "from LIMOUSINE_AGE_KEY"
     if os.environ.get("LIMOUSINE_NO_KEY_PROMPT") == "1" or not sys.stdin.isatty():
         return "locked (no key)"
     try:
-        key = getpass.getpass("Age private key (paste AGE-SECRET-KEY-…, no echo, enter to skip): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        key = ""
+        key = getpass.getpass(
+            "Age private key (paste AGE-SECRET-KEY-…, no echo; Enter to skip, Ctrl+C to abort): "
+        ).strip()
+    except EOFError:
+        key = ""  # Ctrl+D / no input → skip, store stays locked
+    except KeyboardInterrupt:
+        print("\nAborted.", file=sys.stderr)
+        raise SystemExit(130)
     if key:
         os.environ["LIMOUSINE_AGE_KEY"] = key
         return "key supplied"

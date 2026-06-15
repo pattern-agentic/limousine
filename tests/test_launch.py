@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 from limousine import launch
 
 _KEYS = ("LIMOUSINE_WORKSPACE", "LIMOUSINE_CLONE_ROOT", "LIMOUSINE_MCP_PORT", "LIMOUSINE_LAN")
@@ -70,3 +74,34 @@ def test_prompt_age_key_env_and_no_prompt(monkeypatch):
     monkeypatch.delenv("LIMOUSINE_AGE_KEY")
     monkeypatch.setenv("LIMOUSINE_NO_KEY_PROMPT", "1")
     assert launch.prompt_age_key() == "locked (no key)"
+
+
+def _interactive(monkeypatch, getpass_impl):
+    monkeypatch.delenv("LIMOUSINE_AGE_KEY", raising=False)
+    monkeypatch.delenv("LIMOUSINE_NO_KEY_PROMPT", raising=False)
+    monkeypatch.setattr(launch.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(launch.getpass, "getpass", getpass_impl)
+
+
+def test_prompt_age_key_ctrl_c_aborts(monkeypatch):
+    def boom(_):
+        raise KeyboardInterrupt
+    _interactive(monkeypatch, boom)
+    with pytest.raises(SystemExit) as exc:
+        launch.prompt_age_key()
+    assert exc.value.code == 130
+    assert "LIMOUSINE_AGE_KEY" not in os.environ
+
+
+def test_prompt_age_key_eof_skips(monkeypatch):
+    def eof(_):
+        raise EOFError
+    _interactive(monkeypatch, eof)
+    assert launch.prompt_age_key() == "locked (no key)"
+    assert "LIMOUSINE_AGE_KEY" not in os.environ
+
+
+def test_prompt_age_key_supplied(monkeypatch):
+    _interactive(monkeypatch, lambda _: "  AGE-SECRET-KEY-abc  ")
+    assert launch.prompt_age_key() == "key supplied"
+    assert os.environ["LIMOUSINE_AGE_KEY"] == "AGE-SECRET-KEY-abc"
