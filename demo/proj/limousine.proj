@@ -1,0 +1,18 @@
+{
+  "modules": {
+    "demo": {
+      "services": {
+        "ticker": {
+          "commands": {
+            "start": "i=0; while true; do echo \"tick $i\"; i=$((i+1)); sleep 1; done"
+          }
+        },
+        "prompt": {
+          "commands": {
+            "start": "printf 'Continue? [y/N] '; read ans; echo; echo \"you answered: [$ans]\"; sleep 1; echo bye"
+          }
+        }
+      }
+    }
+  }
+}
