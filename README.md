@@ -1,8 +1,8 @@
-# limousine (Python TUI)
+# limousine
 
-Local dev orchestrator as a single Textual TUI — the Python rewrite of the
-Dart/Flutter/Docker build. Reads `.wksp` / `limousine.proj`, runs services in
-PTYs, streams logs, and serves an MCP endpoint to agents.
+Local dev orchestrator as a single Textual TUI. Reads `.wksp` /
+`limousine.proj`, runs services in PTYs, streams logs, and serves an MCP
+endpoint to agents.
 
 ```bash
 uv sync --extra dev
@@ -50,5 +50,3 @@ Recent workspaces live separately in `~/.limousine.json`. `limousine
 it. On a true first run (no config), it walks you through `--setup` (which writes
 `~/.limousine.config`), then launches. Otherwise it opens the startup/recents
 screen. Run `limousine --setup` any time to re-configure.
-
-See `MIGRATION.md` for architecture and the remaining-work plan.
