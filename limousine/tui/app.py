@@ -532,6 +532,49 @@ class LimousineApp(App):
             self.backend.kill_orphan(sid)
             self.notify(f"Killed orphan {sid}")
 
+    def action_quit(self) -> None:
+        # In daemon mode the services outlive the TUI — offer detach vs. stop daemon.
+        if not isinstance(self.backend, LocalBackend):
+            def on_choice(choice: str | None) -> None:
+                if choice == "detach":
+                    self.exit()
+                elif choice == "stop":
+                    self.run_worker(self._stop_daemon_and_quit(), exclusive=False)
+
+            self.push_screen(screens.QuitDaemonScreen(), on_choice)
+            return
+
+        running = [
+            sid
+            for sid, st in self.backend.service_states().items()
+            if st.status == ProcessStatus.running
+        ]
+        if not running:
+            self.exit()
+            return
+
+        n = len(running)
+        msg = f"{n} running service{'s' if n > 1 else ''} must be stopped first.\nStop all and quit?"
+
+        def on_confirm(yes: bool) -> None:
+            if yes:
+                self._stopping.update(running)
+                self._update_header()
+                self.run_worker(self._stop_all_and_quit(running), exclusive=False)
+
+        self.push_screen(screens.ConfirmScreen(msg), on_confirm)
+
+    async def _stop_all_and_quit(self, sids: list[str]) -> None:
+        await asyncio.gather(*(self._stop_service(sid) for sid in sids))
+        self.exit()
+
+    async def _stop_daemon_and_quit(self) -> None:
+        try:
+            await self.backend.shutdown_daemon()
+        except Exception:
+            pass  # daemon may drop the socket the instant it stops — quit regardless
+        self.exit()
+
     def action_input(self) -> None:
         inp = self.query_one("#stdin", Input)
         if inp.display:

@@ -73,6 +73,44 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class QuitDaemonScreen(ModalScreen[str | None]):
+    """Quitting while attached to a daemon: detach (leave it running) or stop it.
+    Dismisses with "detach", "stop", or None (cancel)."""
+
+    DEFAULT_CSS = """
+    QuitDaemonScreen { align: center middle; }
+    #dialog { width: 64; height: auto; border: thick $warning; background: $surface; padding: 1 2; }
+    #question { width: 100%; content-align: center middle; padding-bottom: 1; }
+    #buttons { width: 100%; height: auto; align: center middle; }
+    #buttons Button { margin: 0 1; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", "No", show=False),
+        Binding("q", "cancel", "No", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(
+                "Are you sure you want to quit?\n"
+                "Services keep running in the background daemon unless you stop it.",
+                id="question",
+            )
+            with Horizontal(id="buttons"):
+                yield Button("Yes", variant="primary", id="detach")
+                yield Button("Yes and stop the daemon", variant="error", id="stop")
+                yield Button("No", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#detach", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None if event.button.id == "cancel" else event.button.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class CommandPicker(ModalScreen[object]):
     """Pick a command to run for a service. Enter runs the highlighted one; `e`
     edits it before running (a one-off command); `y` copies it. Dismisses with

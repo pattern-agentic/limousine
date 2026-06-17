@@ -25,6 +25,7 @@ class Daemon:
         self._clients: set = set()
         self._mcp_server = None
         self._tail_state: dict[str, tuple] = {}
+        self._shutdown_event = asyncio.Event()
         backend.on_state = self._push_state
         backend.on_output = self._push_output
         backend.on_workspace_change = self._push_wschange
@@ -42,9 +43,11 @@ class Daemon:
         return self._server
 
     async def serve(self) -> None:
+        # start_unix_server is already accepting; just stay alive until a
+        # shutdown_daemon RPC (or Ctrl-C) unblocks us, then clean up.
         await self.start()
-        async with self._server:
-            await self._server.serve_forever()
+        await self._shutdown_event.wait()
+        await self.stop()
 
     async def stop(self) -> None:
         if getattr(self, "_tail_task", None):
@@ -59,6 +62,15 @@ class Daemon:
             os.unlink(self.socket_path)
         except OSError:
             pass
+
+    async def _shutdown(self) -> None:
+        """Stop every running service, then unblock serve() so the daemon exits."""
+        running = [sid for sid, st in self.backend.service_states().items()
+                   if st.status.value == "running"]
+        if running:
+            await asyncio.gather(*(self.backend.stop_service(sid) for sid in running),
+                                 return_exceptions=True)
+        self._shutdown_event.set()
 
     # ---- client connections ---------------------------------------------
 
@@ -86,6 +98,9 @@ class Daemon:
         try:
             if method == "snapshot":
                 return {"id": mid, "result": self._snapshot()}
+            if method == "shutdown_daemon":
+                asyncio.ensure_future(self._shutdown())  # after this reply flushes
+                return {"id": mid, "result": True}
             fn = getattr(self.backend, method)
             r = fn(*args)
             if inspect.isawaitable(r):

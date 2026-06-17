@@ -39,17 +39,19 @@ def test_setup_wizard_writes_config(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _clear_env(monkeypatch)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    answers = iter(["/abs/foo.wksp", "/abs/clones", "7000", "y"])
+    answers = iter(["/abs/foo.wksp", "/abs/clones", "7000", "y", "y"])
     monkeypatch.setattr("builtins.input", lambda *a, **k: next(answers))
 
     saved = launch.run_setup_wizard()
     assert saved["mcp_port"] == 7000 and saved["lan"] is True
     assert saved["workspace"] == "/abs/foo.wksp"
+    assert saved["daemon"] is True
 
     text = (tmp_path / ".limousine.config").read_text()
     assert "LIMOUSINE_WORKSPACE=/abs/foo.wksp" in text
     assert "LIMOUSINE_MCP_PORT=7000" in text
     assert "LIMOUSINE_LAN=1" in text
+    assert "LIMOUSINE_DAEMON=1" in text
     resolved, _ = launch.read_config()
     assert resolved["LIMOUSINE_WORKSPACE"] == "/abs/foo.wksp"
 

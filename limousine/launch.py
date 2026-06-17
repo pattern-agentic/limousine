@@ -13,7 +13,8 @@ import sys
 import time
 from pathlib import Path
 
-_KEYS = ("LIMOUSINE_WORKSPACE", "LIMOUSINE_CLONE_ROOT", "LIMOUSINE_MCP_PORT", "LIMOUSINE_LAN")
+_KEYS = ("LIMOUSINE_WORKSPACE", "LIMOUSINE_CLONE_ROOT", "LIMOUSINE_MCP_PORT", "LIMOUSINE_LAN",
+         "LIMOUSINE_DAEMON")
 
 HELP_CONFIG = """limousine — ~/.limousine.config + environment overrides
 
@@ -24,6 +25,8 @@ fat-fingered value can't run code), or set as a regular env var. Keys:
   LIMOUSINE_CLONE_ROOT   default for --clone-root
   LIMOUSINE_MCP_PORT     default MCP port (built-in default 6891)
   LIMOUSINE_LAN          set to 1 to bind MCP to 0.0.0.0
+  LIMOUSINE_DAEMON       set to 1 to run via a background daemon (services + MCP
+                         survive the TUI; quitting the TUI just detaches)
 
 Env-only (not in the config file):
   LIMOUSINE_AGE_KEY        age private key; if set, skips the startup prompt
@@ -100,6 +103,15 @@ def run_setup_wizard() -> dict | None:
         clone_root = _resolve(ask("Clone root for project repos", existing.get("LIMOUSINE_CLONE_ROOT", "")))
         mcp_port = ask("MCP port", existing.get("LIMOUSINE_MCP_PORT", "6891"))
         lan = ask("Bind MCP to LAN / 0.0.0.0? [y/N]").lower() in ("y", "yes")
+
+        print(
+            "\nDaemon mode keeps your services running in a background process after\n"
+            "you close the TUI (survives a TUI crash; MCP stays up for agents).\n"
+            "Without it, quitting limousine stops everything it started.\n"
+        )
+        daemon_on = existing.get("LIMOUSINE_DAEMON") in ("1", "true", "True")
+        ans = input(f"Enable daemon mode? [{'Y/n' if daemon_on else 'y/N'}]: ").strip().lower()
+        daemon = ans not in ("n", "no") if daemon_on else ans in ("y", "yes")
     except (KeyboardInterrupt, EOFError):
         print("\nCancelled.")
         return None
@@ -119,6 +131,8 @@ def run_setup_wizard() -> dict | None:
         lines.append(f"LIMOUSINE_MCP_PORT={mcp_port}")
     if lan:
         lines.append("LIMOUSINE_LAN=1")
+    if daemon:
+        lines.append("LIMOUSINE_DAEMON=1")
     path.write_text("\n".join(lines) + "\n")
     path.chmod(0o600)
     print(f"\n✓ Saved {path}\n")
@@ -127,6 +141,7 @@ def run_setup_wizard() -> dict | None:
         "clone_root": clone_root or None,
         "mcp_port": int(mcp_port) if mcp_port else None,
         "lan": lan,
+        "daemon": daemon,
     }
 
 

@@ -3,6 +3,7 @@ load-bearing property — services survive a client disconnect/reconnect."""
 
 import asyncio
 import json
+import os
 import socket
 from pathlib import Path
 
@@ -109,6 +110,29 @@ async def test_daemon_stdin_and_tail_pushes(tmp_path):
         assert any("got hi" in l for l in client.buffer("demo/prompt"))
     finally:
         await daemon.stop()
+
+
+async def test_daemon_shutdown_rpc_stops_services_and_exits(tmp_path):
+    backend = LocalBackend()
+    await backend.open_workspace(_ticker_workspace(tmp_path))
+    sock = str(tmp_path / "d.sock")
+    daemon = Daemon(backend, sock, mcp_allowed=False)
+    serve_task = asyncio.ensure_future(daemon.serve())
+    for _ in range(60):  # wait for the socket to appear
+        if os.path.exists(sock):
+            break
+        await asyncio.sleep(0.05)
+
+    client = DaemonBackend(sock)
+    await client.connect()
+    client.start_service("demo/ticker")
+    await asyncio.sleep(1.2)
+    assert client.service_states()["demo/ticker"].status == ProcessStatus.running
+
+    assert await client.shutdown_daemon() is True
+    await asyncio.wait_for(serve_task, timeout=5)  # serve() unblocks on shutdown
+    assert backend.service_states()["demo/ticker"].status != ProcessStatus.running
+    assert not os.path.exists(sock)  # socket cleaned up
 
 
 async def test_daemon_restarts_mcp_on_settings_change(tmp_path):

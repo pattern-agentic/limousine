@@ -207,6 +207,11 @@ class DaemonBackend(Backend):
     async def stop_service(self, sid: str) -> bool:
         return await self._rpc("stop_service", sid)
 
+    async def shutdown_daemon(self) -> bool:
+        """Ask the daemon to stop all services and exit. The socket dies right
+        after the ack, so this is the last RPC on the connection."""
+        return await self._rpc("shutdown_daemon")
+
     async def git_status(self, name: str) -> GitStatus:
         return wire.git_status_from_wire(await self._rpc("git_status", name))
 
