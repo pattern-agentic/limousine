@@ -499,6 +499,62 @@ async def test_log_sticky_scroll_and_mark():
         assert any("─" in l for l in backend.buffer("demo/ticker"))
 
 
+async def test_double_selection_does_not_kill_the_app():
+    """A double-click / fast double Enter queues two selections; the second
+    used to dismiss an already-popped screen and take the app down."""
+    backend = LocalBackend()
+    await backend.open_workspace(DEMO)
+    app = LimousineApp(backend, mcp_allowed=False)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        started = []
+        backend.start_service = lambda sid, **kw: started.append(sid)
+        app.action_start()
+        await pilot.pause()
+        scr = app.screen
+        assert isinstance(scr, screens.CommandPicker)
+        scr.dismiss("start")
+        scr.dismiss("start")  # the queued duplicate
+        await pilot.pause()
+        assert app.is_running
+        assert len(started) == 1          # the callback ran once
+        assert app.screen is app.screen_stack[0]
+
+
+async def test_ui_error_is_contained_and_logged(tmp_path, monkeypatch):
+    from textual.message import Message
+    from textual.widgets import Static
+
+    monkeypatch.setattr("limousine.tui.app.ERROR_LOG", tmp_path / "errors.log")
+
+    class Boom(Message):
+        pass
+
+    class BoomScreen(screens.Modal[None]):
+        def compose(self):
+            yield Static("boom")
+
+        def on_boom(self, message: Boom) -> None:
+            raise RuntimeError("kaboom")
+
+    backend = LocalBackend()
+    await backend.open_workspace(DEMO)
+    app = LimousineApp(backend, mcp_allowed=False)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        app.push_screen(BoomScreen())
+        await pilot.pause()
+        # post directly: the raising pump stops draining, so pilot.pause
+        # (which waits on it) would time out
+        app.screen.post_message(Boom())
+        assert await _wait_for(lambda: not isinstance(app.screen, BoomScreen), tries=30)
+        assert app.is_running                        # app survives, dead modal popped
+        assert "kaboom" in app._last_error
+        assert "kaboom" in (tmp_path / "errors.log").read_text()
+        app.action_last_error()
+        assert await _wait_for(lambda: isinstance(app.screen, screens.TextModal), tries=30)
+
+
 async def test_startup_screen_when_no_workspace():
     backend = LocalBackend()  # never opened
     app = LimousineApp(backend, mcp_allowed=False)

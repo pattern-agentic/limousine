@@ -11,12 +11,16 @@ import socket
 import subprocess
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.message_pump import active_message_pump
+from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
 
 from ..backend.backend import Backend, BackendError, LocalBackend
@@ -31,6 +35,9 @@ _DOT = {
     ProcessStatus.stopped: "[grey50]○[/]",
     ProcessStatus.orphaned: "[yellow]◍[/]",
 }
+
+ERROR_LOG = Path(tempfile.gettempdir()) / "limousine-errors.log"
+_MAX_DISTINCT_ERRORS = 20  # past this the app is clearly broken — let Textual bail
 
 _SECRET_LABEL = {
     SecretStoreStatus.VERIFIED: "🔓 secrets",
@@ -107,6 +114,9 @@ class LimousineApp(App):
         self._mcp_server = None
         self._display_timer = None
         self._display_debounce = 0.4  # header instant, log swaps after the cursor settles
+        self._errors: dict[str, int] = {}  # contained UI errors: signature → count
+        self._last_error = ""
+        self._in_error_handler = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -138,6 +148,73 @@ class LimousineApp(App):
             self._refresh_mcp()
             self._secret_label = _SECRET_LABEL.get(self.backend.secret_store_status(), "")
             self._update_subtitle()
+
+    # ---- crash containment -----------------------------------------------
+
+    def _handle_exception(self, error: Exception) -> None:
+        """Textual funnels every unhandled exception here — message handlers,
+        timers, workers — and the default tears the app down, killing every
+        service with it. A UI bug shouldn't cost a day's worth of running
+        processes: log it, tell the user, drop the screen that blew up."""
+        if self._in_error_handler or len(self._errors) >= _MAX_DISTINCT_ERRORS:
+            super()._handle_exception(error)  # re-entrant or hopeless — give up
+            return
+        self._in_error_handler = True
+        try:
+            self._contain_error(error)
+        except Exception:
+            super()._handle_exception(error)
+        finally:
+            self._in_error_handler = False
+
+    def _contain_error(self, error: Exception) -> None:
+        inner = getattr(error, "error", None)  # WorkerFailed wraps the real one
+        if isinstance(inner, Exception):
+            error = inner
+        tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        self._last_error = f"{stamp}\n\n{tb}"
+        self.log.error(tb)
+        try:
+            with ERROR_LOG.open("a") as f:
+                f.write(f"\n===== {stamp} =====\n{tb}")
+        except OSError:
+            pass
+        self._drop_broken_screen()
+        sig = f"{type(error).__name__}:{tb.rsplit('File', 1)[-1][:120]}"
+        seen = self._errors.get(sig, 0)
+        self._errors[sig] = seen + 1
+        if seen:
+            return  # already flagged this one — don't spam the same toast
+        self.notify(
+            f"UI error contained: {type(error).__name__}: {error}\n"
+            f"m → Last error (also in {ERROR_LOG})",
+            severity="error", timeout=12,
+        )
+
+    def _drop_broken_screen(self) -> None:
+        """The message pump that raised stops processing messages, so a modal
+        that blew up would sit there dead, swallowing input. Pop it — the main
+        screen (and the services) keep running."""
+        try:
+            pump = active_message_pump.get(None)
+            screen = pump if isinstance(pump, Screen) else pump.screen if isinstance(pump, Widget) else None
+        except Exception:
+            return  # a detached widget has no screen — nothing to pop
+        if screen is None or screen not in self.screen_stack:
+            return
+
+        def pop() -> None:
+            while screen in self.screen_stack and len(self.screen_stack) > 1:
+                self.pop_screen()
+
+        self.call_later(pop)
+
+    def action_last_error(self) -> None:
+        if not self._last_error:
+            self.notify("No errors so far")
+            return
+        self.push_screen(screens.TextModal(f"last error — {ERROR_LOG}", self._last_error))
 
     # ---- sidebar ---------------------------------------------------------
 
@@ -668,6 +745,7 @@ class LimousineApp(App):
             ("open", "Open workspace…"),
             ("settings", "Settings"),
             ("clear", "Clear log"),
+            ("last_error", "Last error"),
         ]
 
         def on_pick(action_id: str | None) -> None:

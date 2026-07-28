@@ -7,9 +7,10 @@ import time
 
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.await_complete import AwaitComplete
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, ScreenResultType
 from textual.widgets import Button, Checkbox, Input, Label, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
@@ -35,7 +36,29 @@ def _unlocked(status: SecretStoreStatus) -> bool:
     return status in (SecretStoreStatus.VERIFIED, SecretStoreStatus.NEW_STAMP)
 
 
-class ConfirmScreen(ModalScreen[bool]):
+class Modal(ModalScreen[ScreenResultType]):
+    """ModalScreen with an idempotent dismiss.
+
+    Textual pops the screen inside `dismiss()`, but the screen keeps pumping
+    messages until the pop lands — so a second selection queued behind the
+    first (double-click on an OptionList, a fast double Enter) reaches a
+    handler that dismisses an already-popped screen. Textual's `pop_screen`
+    then raises ScreenStackError, which is unhandled and kills the app."""
+
+    _dismissed = False
+
+    def dismiss(self, result: ScreenResultType | None = None) -> AwaitComplete:
+        try:
+            live = self in self.app.screen_stack
+        except Exception:  # no active app / not mounted
+            live = False
+        if self._dismissed or not live:
+            return AwaitComplete.nothing()
+        self._dismissed = True
+        return super().dismiss(result)
+
+
+class ConfirmScreen(Modal[bool]):
     DEFAULT_CSS = """
     ConfirmScreen { align: center middle; }
     #dialog { width: 56; height: auto; border: thick $warning; background: $surface; padding: 1 2; }
@@ -73,7 +96,7 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class QuitDaemonScreen(ModalScreen[str | None]):
+class QuitDaemonScreen(Modal[str | None]):
     """Quitting while attached to a daemon: detach (leave it running) or stop it.
     Dismisses with "detach", "stop", or None (cancel)."""
 
@@ -111,7 +134,7 @@ class QuitDaemonScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class CommandPicker(ModalScreen[object]):
+class CommandPicker(Modal[object]):
     """Pick a command to run for a service. Enter runs the highlighted one; `e`
     edits it before running (a one-off command); `y` copies it. Dismisses with
     the command name, or `("raw", text)` for an edited command."""
@@ -193,7 +216,7 @@ class CommandPicker(ModalScreen[object]):
             self.dismiss(None)
 
 
-class TextModal(ModalScreen[None]):
+class TextModal(Modal[None]):
     DEFAULT_CSS = """
     TextModal { align: center middle; }
     #box { width: 80%; height: 70%; border: round $primary; background: $surface; padding: 1 2; }
@@ -275,7 +298,7 @@ def _git_brief(name: str, s, namew: int = 20) -> Text:
     return t
 
 
-class GitDashboard(ModalScreen[None]):
+class GitDashboard(Modal[None]):
     """Separate git view: every project's state (branch/sha/dirty/upstream/behind
     main/tag/fetched/drift) with Fetch, ff-only Pull, and Clone."""
 
@@ -393,7 +416,7 @@ class GitDashboard(ModalScreen[None]):
         self.dismiss(None)
 
 
-class ActionMenu(ModalScreen[str]):
+class ActionMenu(Modal[str]):
     """A small 'more actions' menu so the footer can stay uncluttered."""
 
     DEFAULT_CSS = """
@@ -427,7 +450,7 @@ class ActionMenu(ModalScreen[str]):
         self.dismiss(None)
 
 
-class _DiffEditor(ModalScreen[bool]):
+class _DiffEditor(Modal[bool]):
     """Side-by-side editor: editable `active` (left) vs read-only `template`
     (right), with an 'add missing keys from template' action. Subclasses supply
     the kind label, file names, and how to load/save (env vs secrets)."""
@@ -618,7 +641,7 @@ class SecretsScreen(_DiffEditor):
             self.notify(f"save failed: {e}", severity="error")
 
 
-class SettingsScreen(ModalScreen[bool]):
+class SettingsScreen(Modal[bool]):
     DEFAULT_CSS = """
     SettingsScreen { align: center middle; }
     #box { width: 64; height: auto; border: round $primary; background: $surface; padding: 1 2; }
@@ -667,7 +690,7 @@ class SettingsScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class StartupScreen(ModalScreen[str]):
+class StartupScreen(Modal[str]):
     DEFAULT_CSS = """
     StartupScreen { align: center middle; }
     #box { width: 80; height: auto; border: round $primary; background: $surface; padding: 1 2; }
